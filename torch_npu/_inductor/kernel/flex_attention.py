@@ -673,7 +673,7 @@ def _get_flex_attention_additional_lowerings():
     These lowerings allow supported fallback operations to be lowered as pointwise
     ops in the score_mod and mask_mod subgraphs.
     """
-    from torch._inductor.lowering import make_pointwise
+    from torch._inductor.lowering import index_impl, make_pointwise
 
     additional_lowerings = {}
 
@@ -716,10 +716,18 @@ def _get_flex_attention_additional_lowerings():
             return integer_remainder_fn(a, b)
         return remainder_fn(a, b)
 
+    def index_tensor(x, indices):
+        # Flex score/mask callbacks commonly index captured tensors with the
+        # scalar q/kv coordinates.  Keep that lookup inside the pointwise
+        # subgraph; the global NPU index lowering may choose an ATen fallback,
+        # which materializes a buffer that PointwiseSubgraphLowering rejects.
+        return index_impl(x, indices, check=True)
+
     additional_lowerings[aten.bitwise_and.Tensor] = bitwise_and_tensor
     additional_lowerings[aten.bitwise_or.Tensor] = bitwise_or_tensor
     additional_lowerings[aten.bitwise_not.default] = bitwise_not_default
     additional_lowerings[aten.remainder.Scalar] = remainder_scalar
+    additional_lowerings[aten.index.Tensor] = index_tensor
     additional_lowerings[torch.ops.flex_lib.zeros_and_scatter.default] = zeros_and_scatter_lowering
 
     return additional_lowerings
@@ -2943,6 +2951,13 @@ def _register_npu_inductor_flex_attention():
 
         has_full_blocks = full_kv_num_blocks is not None
         kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+        if not has_full_blocks:
+            (
+                full_kv_num_blocks,
+                full_kv_indices,
+                full_q_num_blocks,
+                full_q_indices,
+            ) = (empty(0, device=query.get_device()) for _ in range(4))
 
         set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
