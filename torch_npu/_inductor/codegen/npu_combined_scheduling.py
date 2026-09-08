@@ -63,6 +63,14 @@ class NPUCombinedScheduling(CUDACombinedScheduling, TritonScheduling):
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
 
+    def can_fuse_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        # CUDACombinedScheduling implements this hook only for NVIDIA Universal
+        # GEMM templates. NPUCombinedScheduling deliberately does not construct
+        # that CUDA-only scheduler, so this fusion path is not applicable.
+        return False
+
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
