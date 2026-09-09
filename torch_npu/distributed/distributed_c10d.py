@@ -36,7 +36,6 @@ from torch.distributed.distributed_c10d import (
     get_rank,
     get_world_size,
     GroupMember,
-    isend,
     ProcessGroup,
     ReduceScatterOptions,
 )
@@ -54,14 +53,18 @@ origin_get_sequence_number_for_group = ProcessGroup._get_sequence_number_for_gro
 npu_device_name = None
 
 
+def _get_peer_kwarg(op):
+    # P2POp stores the currently published torch.distributed function.
+    # Compare against that function rather than an import-time alias so API
+    # instrumentation wrappers do not turn sends into receives.
+    key = "group_dst" if op.op is dist.isend else "group_src"
+    return {key: op.group_peer}
+
+
 def _batch_isend_irecv(p2p_op_list):
     group = p2p_op_list[0].group
     device = p2p_op_list[0].tensor.device
     is_multi_pg = True
-
-    def peer_kwarg(op):
-        key = "group_dst" if op.op is isend else "group_src"
-        return {key: op.group_peer}
 
     if device.type == "cuda":
         with _coalescing_manager(group, device, async_ops=True) as cm:
@@ -94,7 +97,7 @@ def _batch_isend_irecv(p2p_op_list):
                         p2p_op.tensor,
                         group=p2p_op.group,
                         tag=p2p_op.tag,
-                        **peer_kwarg(p2p_op),
+                        **_get_peer_kwarg(p2p_op),
                     )
             return cm.works
         else:

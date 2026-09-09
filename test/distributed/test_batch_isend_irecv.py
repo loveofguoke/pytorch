@@ -1,15 +1,44 @@
-import unittest
 import os
-import numpy as np
+import unittest
+from types import SimpleNamespace
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
 import torch_npu
+from torch_npu.distributed.distributed_c10d import _get_peer_kwarg
 from torch_npu.testing.testcase import TestCase, run_tests
 from torch_npu.testing.common_utils import create_common_tensor
 from torch_npu.testing.common_distributed import skipIfUnsupportMultiNPU
+
+
+class P2POpDirectionTest(TestCase):
+    def test_wrapped_p2p_functions_keep_direction(self):
+        original_isend = dist.isend
+        original_irecv = dist.irecv
+
+        def wrapped_isend(*args, **kwargs):
+            return original_isend(*args, **kwargs)
+
+        def wrapped_irecv(*args, **kwargs):
+            return original_irecv(*args, **kwargs)
+
+        try:
+            dist.isend = wrapped_isend
+            dist.irecv = wrapped_irecv
+            self.assertEqual(
+                _get_peer_kwarg(SimpleNamespace(op=dist.isend, group_peer=3)),
+                {"group_dst": 3},
+            )
+            self.assertEqual(
+                _get_peer_kwarg(SimpleNamespace(op=dist.irecv, group_peer=5)),
+                {"group_src": 5},
+            )
+        finally:
+            dist.isend = original_isend
+            dist.irecv = original_irecv
 
 
 class HcomBatchIsendIrecvTest(TestCase):
