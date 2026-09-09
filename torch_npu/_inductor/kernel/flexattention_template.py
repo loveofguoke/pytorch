@@ -937,6 +937,7 @@ flex_attention_backward_qmajor_dq_source = r"""
     stride_kv_idx_h = {{stride("KV_IDX", 1)}}
     stride_kv_idx_m = {{stride("KV_IDX", 2)}}
     stride_kv_idx_blk = {{stride("KV_IDX", 3)}}
+{% if HAS_FULL_BLOCKS %}
     stride_full_kv_num_blks_z = {{stride("FULL_KV_NUM_BLKS", 0)}}
     stride_full_kv_num_blks_h = {{stride("FULL_KV_NUM_BLKS", 1)}}
     stride_full_kv_num_blks_m = {{stride("FULL_KV_NUM_BLKS", 2)}}
@@ -944,6 +945,7 @@ flex_attention_backward_qmajor_dq_source = r"""
     stride_full_kv_idx_h = {{stride("FULL_KV_IDX", 1)}}
     stride_full_kv_idx_m = {{stride("FULL_KV_IDX", 2)}}
     stride_full_kv_idx_blk = {{stride("FULL_KV_IDX", 3)}}
+{% endif %}
 
     for task_id in range(pid, DQ_NUM_TASKS, num_core):
         task_id_index = task_id.to(INDEX_DTYPE)
@@ -1263,6 +1265,11 @@ flex_attention_backward_dkdv_only_source = r"""
     stride_q_num_blks_h = {{stride("Q_NUM_BLKS", 1)}}
     stride_q_idx_h = {{stride("Q_IDX", 1)}}
     stride_q_idx_n = {{stride("Q_IDX", 2)}}
+{% if HAS_FULL_BLOCKS %}
+    stride_full_q_num_blks_h = {{stride("FULL_Q_NUM_BLKS", 1)}}
+    stride_full_q_idx_h = {{stride("FULL_Q_IDX", 1)}}
+    stride_full_q_idx_n = {{stride("FULL_Q_IDX", 2)}}
+{% endif %}
 
     for task_id in range(pid, NUM_TASKS, num_core):
         task_id_index = task_id.to(INDEX_DTYPE)
@@ -1313,6 +1320,10 @@ flex_attention_backward_dkdv_only_source = r"""
             sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_hq1
             sparse_q_num_blks_offset = sparse_hz_offset * stride_q_num_blks_h + pid_mask
             sparse_q_idx_offset = sparse_hz_offset * stride_q_idx_h + pid_mask * stride_q_idx_n
+{% if HAS_FULL_BLOCKS %}
+            sparse_full_q_num_blks_offset = sparse_hz_offset * stride_full_q_num_blks_h + pid_mask
+            sparse_full_q_idx_offset = sparse_hz_offset * stride_full_q_idx_h + pid_mask * stride_full_q_idx_n
+{% endif %}
 
             q_indices = Q_IDX + sparse_q_idx_offset
             sparse_q_num_blocks = tl.load(Q_NUM_BLKS + sparse_q_num_blks_offset)
@@ -1337,8 +1348,8 @@ flex_attention_backward_dkdv_only_source = r"""
                 )
 
             if HAS_FULL_BLOCKS:
-                q_indices = FULL_Q_IDX + sparse_q_idx_offset
-                sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
+                q_indices = FULL_Q_IDX + sparse_full_q_idx_offset
+                sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_full_q_num_blks_offset)
                 hi = tl.minimum(
                     sparse_q_num_blocks * SPARSE_Q_MULTIPLE,
                     tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1),
@@ -1719,11 +1730,13 @@ flex_attention_backward_dkdv_tasklist_source = (
     stride_q_idx_z = {{stride("Q_IDX", 0)}}
     stride_q_idx_h = {{stride("Q_IDX", 1)}}
     stride_q_idx_n = {{stride("Q_IDX", 2)}}
+{% if HAS_FULL_BLOCKS %}
     stride_full_q_num_blks_z = {{stride("FULL_Q_NUM_BLKS", 0)}}
     stride_full_q_num_blks_h = {{stride("FULL_Q_NUM_BLKS", 1)}}
     stride_full_q_idx_z = {{stride("FULL_Q_IDX", 0)}}
     stride_full_q_idx_h = {{stride("FULL_Q_IDX", 1)}}
     stride_full_q_idx_n = {{stride("FULL_Q_IDX", 2)}}
+{% endif %}
 
     ZQ = {{size("Q", 0)}}
     HQ = {{size("Q", 1)}}
