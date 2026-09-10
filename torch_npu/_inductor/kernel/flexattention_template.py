@@ -1075,6 +1075,16 @@ flex_attention_backward_qmajor_dq_source = r"""
 {% endif %}
             dp = tl.dot(do, tl.trans(v), input_precision="ieee")
             ds = p * (dp - Di[:, None])
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+            ds_max = tl.max(tl.abs(ds.to(tl.float32)))
+            if ds_max > 1.0:
+                tl.device_print(
+                    "FLEX_DQ_BAD_DS:", task_id, kv_work_pos,
+                    tl.max(tl.abs(Di.to(tl.float32))),
+                    tl.max(tl.abs(dp.to(tl.float32))),
+                    tl.max(tl.abs(p.to(tl.float32))), ds_max,
+                )
+{% endif %}
 {% if TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
             dq += tl.dot(ds.to(MATMUL_PRECISION), k, input_precision="ieee")
 {% else %}
@@ -1162,6 +1172,16 @@ flex_attention_backward_qmajor_dq_source = r"""
 {% endif %}
                 dp = tl.dot(do, tl.trans(v), input_precision="ieee")
                 ds = p * (dp - Di[:, None])
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+                ds_max = tl.max(tl.abs(ds.to(tl.float32)))
+                if ds_max > 1.0:
+                    tl.device_print(
+                        "FLEX_DQ_BAD_DS_FULL:", task_id, kv_work_pos,
+                        tl.max(tl.abs(Di.to(tl.float32))),
+                        tl.max(tl.abs(dp.to(tl.float32))),
+                        tl.max(tl.abs(p.to(tl.float32))), ds_max,
+                    )
+{% endif %}
 {% if TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
                 dq += tl.dot(ds.to(MATMUL_PRECISION), k, input_precision="ieee")
 {% else %}
@@ -1180,6 +1200,11 @@ flex_attention_backward_qmajor_dq_source = r"""
 {% endif %}
 
         dq *= SM_SCALE
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+        dq_max = tl.max(tl.abs(dq.to(tl.float32)))
+        if dq_max > 1.0:
+            tl.device_print("FLEX_DQ_BAD_OUTPUT:", task_id, dq_max)
+{% endif %}
         index_m = offs_m[:, None]
         index_k = offs_k[None, :]
         if SAFE_HEAD_DIM:
@@ -1502,6 +1527,16 @@ def bwd_dkdv_block_mn(
         Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN, other=0.0)
     dpT = tl.dot(do, tl.trans(v), input_precision="ieee")
     dsT = (pT * (dpT - Di[:, None])).to(MATMUL_PRECISION)
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+    ds_max = tl.max(tl.abs(dsT.to(tl.float32)))
+    if ds_max > 1.0:
+        tl.device_print(
+            "FLEX_DK_BAD_DS:", off_z, off_hq, start_m1,
+            tl.max(tl.abs(Di.to(tl.float32))),
+            tl.max(tl.abs(dpT.to(tl.float32))),
+            tl.max(tl.abs(pT.to(tl.float32))), ds_max,
+        )
+{% endif %}
 {% if not TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
     {{ modification(
         subgraph_number=1,
@@ -1544,6 +1579,11 @@ def bwd_dkdv_block_mn(
     index_k = offs_k[None, :]
 
     dk = tl.dot(tl.trans(dsT).to(MATMUL_PRECISION), qT, input_precision="ieee")
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+    dk_max = tl.max(tl.abs(dk.to(tl.float32)))
+    if dk_max > 1.0:
+        tl.device_print("FLEX_DK_BAD_OUTPUT:", off_z, off_hq, start_m1, dk_max)
+{% endif %}
 {% if PRESCALE_QK %}
     dk *= SM_SCALE
 {% endif %}
@@ -1646,6 +1686,16 @@ def bwd_dkdv_full_block_mn(
         Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN, other=0.0)
     dpT = tl.dot(do, tl.trans(v), input_precision="ieee")
     dsT = (pT * (dpT - Di[:, None])).to(MATMUL_PRECISION)
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+    ds_max = tl.max(tl.abs(dsT.to(tl.float32)))
+    if ds_max > 1.0:
+        tl.device_print(
+            "FLEX_DK_BAD_DS_FULL:", off_z, off_hq, start_m1,
+            tl.max(tl.abs(Di.to(tl.float32))),
+            tl.max(tl.abs(dpT.to(tl.float32))),
+            tl.max(tl.abs(pT.to(tl.float32))), ds_max,
+        )
+{% endif %}
 {% if not TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
     {{ modification(
         subgraph_number=1,
@@ -1686,6 +1736,11 @@ def bwd_dkdv_full_block_mn(
     index_k = offs_k[None, :]
 
     dk = tl.dot(tl.trans(dsT).to(MATMUL_PRECISION), qT, input_precision="ieee")
+{% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
+    dk_max = tl.max(tl.abs(dk.to(tl.float32)))
+    if dk_max > 1.0:
+        tl.device_print("FLEX_DK_BAD_OUTPUT_FULL:", off_z, off_hq, start_m1, dk_max)
+{% endif %}
 {% if PRESCALE_QK %}
     dk *= SM_SCALE
 {% endif %}
