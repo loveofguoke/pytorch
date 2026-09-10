@@ -126,6 +126,17 @@ _LN2 = 0.6931471805599453
 _LOG2E = 1.4426950408889634
 
 
+def _flex_dsdp_diagnostics_enabled() -> bool:
+    diagnostic_rank = os.environ.get(
+        "TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTIC_RANK"
+    )
+    current_rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0"))
+    return (
+        os.environ.get("TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS") == "1"
+        and diagnostic_rank in (None, "all", current_rank)
+    )
+
+
 def _tag_flex_attention_report_choices(new_choices, cfg):
     """Attach tiling metadata used by NPU choice diagnostics."""
     report_config = {
@@ -2142,13 +2153,8 @@ def _register_npu_inductor_flex_attention():
         kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
         kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
         kernel_options["TORCHINDUCTOR_FLEXATTENTION_MASKOUT"] = True
-        diagnostic_rank = os.environ.get(
-            "TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTIC_RANK"
-        )
-        current_rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0"))
         kernel_options["TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS"] = (
-            os.environ.get("TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS") == "1"
-            and (diagnostic_rank in (None, "all", current_rank))
+            _flex_dsdp_diagnostics_enabled()
         )
 
         (
@@ -2758,6 +2764,11 @@ def _register_npu_inductor_flex_attention():
         kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
         kernel_options.setdefault("WRITE_DQ", True)
         kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
+        # Backward templates are rendered independently from forward choices;
+        # always define this Jinja option, including when diagnostics are off.
+        kernel_options["TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS"] = (
+            _flex_dsdp_diagnostics_enabled()
+        )
         kernel_options.setdefault(
             "IS_DIVISIBLE",
             _sequence_lengths_are_statically_divisible(seq_len_q, seq_len_kv),
