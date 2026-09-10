@@ -1,6 +1,7 @@
 """ Triton Implementation of the flex_attention Kernel"""
 
 import math
+import os
 from collections.abc import Sequence
 from functools import wraps
 from typing import Any, Dict, Optional, Union
@@ -2141,6 +2142,14 @@ def _register_npu_inductor_flex_attention():
         kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
         kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
         kernel_options["TORCHINDUCTOR_FLEXATTENTION_MASKOUT"] = True
+        diagnostic_rank = os.environ.get(
+            "TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTIC_RANK"
+        )
+        current_rank = os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0"))
+        kernel_options["TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS"] = (
+            os.environ.get("TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS") == "1"
+            and (diagnostic_rank in (None, "all", current_rank))
+        )
 
         (
             query,
