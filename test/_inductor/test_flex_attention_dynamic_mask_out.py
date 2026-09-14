@@ -13,19 +13,28 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
 
         self.assertIn("valid_m = offs_m1 < Q_LEN", template)
         self.assertIn(
-            'tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))',
+            "if IS_DIVISIBLE and not GUARD_SPARSE_Q_ROWS:",
             template,
         )
         self.assertIn(
-            "& valid_m[:, None]\n            & (offs_n1[None, :] < KV_LEN)",
+            'lse = tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))',
             template,
         )
         self.assertIn(
             "tl.load(DELTA + offs_m1, mask=valid_m, other=0.0)",
             template,
         )
-        self.assertNotIn("lse = tl.load(LSE + offs_m1)\n", template)
-        self.assertNotIn("Di = tl.load(DELTA + offs_m1)\n", template)
+        self.assertIn(
+            "if GUARD_SPARSE_Q_ROWS:\n"
+            "            mask_mod_output = mask_mod_output & valid_m[:, None]",
+            template,
+        )
+
+    def test_backward_preserves_divisible_self_attention_loads(self):
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("lse = tl.load(LSE + offs_m1)\n", template)
+        self.assertIn("Di = tl.load(DELTA + offs_m1)\n", template)
 
     def test_backward_masks_missing_partial_block_before_loading(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")

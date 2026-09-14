@@ -3355,6 +3355,12 @@ def _register_npu_inductor_flex_attention():
             len(bwd_dkdv_dict_configs),
         )
 
+        # Context parallelism can present local Q with gathered K/V metadata.
+        # Only that asymmetric layout needs runtime guards for sparse query rows;
+        # preserve the original unmasked divisible loads for self-attention.
+        kernel_options["GUARD_SPARSE_Q_ROWS"] = not V.graph.sizevars.evaluate_expr(
+            sympy.Eq(seq_len_q, seq_len_kv)
+        )
         original_kernel_options = kernel_options.copy()
 
         def make_bwd_base_kernel_options(cfg: dict) -> dict:

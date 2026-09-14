@@ -1425,11 +1425,11 @@ def bwd_dkdv_block_mn(
         mask=(offs_m1[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM),
         other=0.0,
     )
-    # Sparse Q metadata may retain blocks outside the local query shard under
-    # context parallelism. IS_DIVISIBLE only describes the local tensor shape;
-    # it does not prove that every sparse-list row is local.
     valid_m = offs_m1 < Q_LEN
-    lse = tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))
+    if IS_DIVISIBLE and not GUARD_SPARSE_Q_ROWS:
+        lse = tl.load(LSE + offs_m1)
+    else:
+        lse = tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))
     lse = tl.where(lse == -float("inf"), 0.0, lse)
     qkT = tl.dot(qT, tl.trans(k), input_precision="ieee")
     if not PRESCALE_QK:
@@ -1488,11 +1488,9 @@ def bwd_dkdv_block_mn(
             mask=valid_partial_block,
             other=False,
         )
-        mask_mod_output = (
-            mask_mod_output
-            & valid_m[:, None]
-            & (offs_n1[None, :] < KV_LEN)
-        )
+        if GUARD_SPARSE_Q_ROWS:
+            mask_mod_output = mask_mod_output & valid_m[:, None]
+        mask_mod_output = mask_mod_output & (offs_n1[None, :] < KV_LEN)
 {% else %}
         {{ modification(
             subgraph_number=2,
@@ -1534,7 +1532,10 @@ def bwd_dkdv_block_mn(
         dv,
         mask=(index_n < KV_LEN) & (index_v < V_HEAD_DIM),
     )
-    Di = tl.load(DELTA + offs_m1, mask=valid_m, other=0.0)
+    if IS_DIVISIBLE and not GUARD_SPARSE_Q_ROWS:
+        Di = tl.load(DELTA + offs_m1)
+    else:
+        Di = tl.load(DELTA + offs_m1, mask=valid_m, other=0.0)
     dpT = tl.dot(do, tl.trans(v), input_precision="ieee")
     dsT = (pT * (dpT - Di[:, None])).to(MATMUL_PRECISION)
 {% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
@@ -1625,7 +1626,10 @@ def bwd_dkdv_full_block_mn(
         other=0.0,
     )
     valid_m = offs_m1 < Q_LEN
-    lse = tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))
+    if IS_DIVISIBLE and not GUARD_SPARSE_Q_ROWS:
+        lse = tl.load(LSE + offs_m1)
+    else:
+        lse = tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))
     lse = tl.where(lse == -float("inf"), 0.0, lse)
     qkT = tl.dot(qT, tl.trans(k), input_precision="ieee")
     if not PRESCALE_QK:
@@ -1688,7 +1692,10 @@ def bwd_dkdv_full_block_mn(
         dv,
         mask=(index_n < KV_LEN) & (index_v < V_HEAD_DIM),
     )
-    Di = tl.load(DELTA + offs_m1, mask=valid_m, other=0.0)
+    if IS_DIVISIBLE and not GUARD_SPARSE_Q_ROWS:
+        Di = tl.load(DELTA + offs_m1)
+    else:
+        Di = tl.load(DELTA + offs_m1, mask=valid_m, other=0.0)
     dpT = tl.dot(do, tl.trans(v), input_precision="ieee")
     dsT = (pT * (dpT - Di[:, None])).to(MATMUL_PRECISION)
 {% if TORCHNPU_FLEXATTENTION_DSDP_DIAGNOSTICS %}
