@@ -54,6 +54,27 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
         self.assertNotIn("broadcasted_grad_key_accum = dkdv_result", lowering)
         self.assertNotIn("grad_query = dq_result", lowering)
 
+    def test_tasklist_unsplit_query_bounds_use_index_dtype(self):
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        # The dynamic task-list kernel uses the same loop for split and
+        # unsplit work items.  Keep the unsplit zero in the same scalar type as
+        # q_hi so Triton does not change the loop index type across branches.
+        self.assertEqual(
+            template.count(
+                "if is_split == 0:\n"
+                "                q_begin = tl.zeros([], dtype=INDEX_DTYPE)"
+            ),
+            1,
+        )
+        self.assertEqual(
+            template.count(
+                "if is_split == 0:\n"
+                "                    full_q_begin = tl.zeros([], dtype=INDEX_DTYPE)"
+            ),
+            1,
+        )
+
     def test_backward_masks_missing_partial_block_only_for_cp_rows(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
