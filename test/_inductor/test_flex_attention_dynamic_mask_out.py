@@ -36,6 +36,15 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
         self.assertIn("lse = tl.load(LSE + offs_m1)\n", template)
         self.assertIn("Di = tl.load(DELTA + offs_m1)\n", template)
 
+    def test_split_backward_returns_selected_template_outputs(self):
+        lowering = LOWERING_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "broadcasted_grad_key_accum = dkdv_result",
+            lowering,
+        )
+        self.assertIn("grad_query = dq_result", lowering)
+
     def test_backward_masks_missing_partial_block_before_loading(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
