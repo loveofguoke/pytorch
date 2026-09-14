@@ -25,8 +25,11 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             template,
         )
         self.assertIn(
-            "if GUARD_SPARSE_Q_ROWS:\n"
-            "            mask_mod_output = mask_mod_output & valid_m[:, None]",
+            "if GUARD_SPARSE_Q_ROWS:",
+            template,
+        )
+        self.assertIn(
+            "mask_mod_output = mask_mod_output & valid_m[:, None]",
             template,
         )
 
@@ -36,14 +39,20 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
         self.assertIn("lse = tl.load(LSE + offs_m1)\n", template)
         self.assertIn("Di = tl.load(DELTA + offs_m1)\n", template)
 
-    def test_split_backward_returns_selected_template_outputs(self):
+    def test_split_backward_keeps_explicit_mutation_outputs(self):
         lowering = LOWERING_PATH.read_text(encoding="utf-8")
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
         self.assertIn(
-            "broadcasted_grad_key_accum = dkdv_result",
-            lowering,
+            '{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ",',
+            template,
         )
-        self.assertIn("grad_query = dq_result", lowering)
+        self.assertIn(
+            '{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DV", "DK",',
+            template,
+        )
+        self.assertNotIn("broadcasted_grad_key_accum = dkdv_result", lowering)
+        self.assertNotIn("grad_query = dq_result", lowering)
 
     def test_backward_masks_missing_partial_block_only_for_cp_rows(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
