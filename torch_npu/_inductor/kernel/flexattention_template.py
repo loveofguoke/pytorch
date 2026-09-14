@@ -1470,7 +1470,6 @@ def bwd_dkdv_block_mn(
         partial_block_idx = tl.load(
             arg_SPARSE_MASK_BLOCK_POS + block_pos_offset
         )
-        valid_partial_block = partial_block_idx >= 0
         safe_partial_block_idx = tl.maximum(partial_block_idx, 0)
 
         offs_m_local = offs_m1[:, None] - q_sparse_start
@@ -1480,17 +1479,22 @@ def bwd_dkdv_block_mn(
             + safe_partial_block_idx * SPARSE_MASK_STRIDE_BLK
         )
         mask_offsets = offs_m_local * SPARSE_MASK_STRIDE_M + offs_n_local
-        # A missing partial block is encoded as -1. Mask the memory access
-        # itself: clamping the index and filtering the loaded value afterwards
-        # still performs an invalid read when the compact mask has no block 0.
-        mask_mod_output = tl.load(
-            mask_base + mask_offsets,
-            mask=valid_partial_block,
-            other=False,
-        )
         if GUARD_SPARSE_Q_ROWS:
+            # CP can produce sparse rows outside the local Q shard. Avoid any
+            # compact-mask read when that row has no partial block.
+            valid_partial_block = partial_block_idx >= 0
+            mask_mod_output = tl.load(
+                mask_base + mask_offsets,
+                mask=valid_partial_block,
+                other=False,
+            )
             mask_mod_output = mask_mod_output & valid_m[:, None]
-        mask_mod_output = mask_mod_output & (offs_n1[None, :] < KV_LEN)
+            mask_mod_output = mask_mod_output & (offs_n1[None, :] < KV_LEN)
+        else:
+            # Preserve the original self-attention codegen. Block zero exists
+            # for this layout, so a missing entry can be filtered after load.
+            mask_mod_output = tl.load(mask_base + mask_offsets)
+            mask_mod_output = mask_mod_output & (partial_block_idx >= 0)
 {% else %}
         {{ modification(
             subgraph_number=2,
