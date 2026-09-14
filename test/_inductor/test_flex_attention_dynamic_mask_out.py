@@ -45,17 +45,28 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
         )
         self.assertIn("grad_query = dq_result", lowering)
 
-    def test_backward_masks_missing_partial_block_before_loading(self):
+    def test_backward_masks_missing_partial_block_only_for_cp_rows(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
-        guarded_load = """valid_partial_block = partial_block_idx >= 0
-        safe_partial_block_idx = tl.maximum(partial_block_idx, 0)"""
-        self.assertIn(guarded_load, template)
         self.assertIn(
-            "mask=valid_partial_block,\n            other=False,",
+            "safe_partial_block_idx = tl.maximum(partial_block_idx, 0)",
             template,
         )
-        self.assertNotIn(
+        self.assertIn(
+            "if GUARD_SPARSE_Q_ROWS:\n"
+            "            # CP can produce sparse rows outside the local Q shard.",
+            template,
+        )
+        self.assertIn(
+            "mask=valid_partial_block,\n                other=False,",
+            template,
+        )
+        self.assertIn(
+            "else:\n"
+            "            # Preserve the original self-attention codegen.",
+            template,
+        )
+        self.assertIn(
             "mask_mod_output = mask_mod_output & (partial_block_idx >= 0)",
             template,
         )
