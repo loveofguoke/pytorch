@@ -8,6 +8,21 @@ TEMPLATE_PATH = REPO_ROOT / "torch_npu/_inductor/kernel/flexattention_template.p
 
 
 class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
+    def test_backward_masks_missing_partial_block_before_loading(self):
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        guarded_load = """valid_partial_block = partial_block_idx >= 0
+        safe_partial_block_idx = tl.maximum(partial_block_idx, 0)"""
+        self.assertIn(guarded_load, template)
+        self.assertIn(
+            "mask=valid_partial_block,\n            other=False,",
+            template,
+        )
+        self.assertNotIn(
+            "mask_mod_output = mask_mod_output & (partial_block_idx >= 0)",
+            template,
+        )
+
     def test_optional_full_block_strides_are_guarded_during_rendering(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
