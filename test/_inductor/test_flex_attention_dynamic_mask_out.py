@@ -8,6 +8,25 @@ TEMPLATE_PATH = REPO_ROOT / "torch_npu/_inductor/kernel/flexattention_template.p
 
 
 class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
+    def test_backward_masks_sparse_query_rows_to_local_query_length(self):
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("valid_m = offs_m1 < Q_LEN", template)
+        self.assertIn(
+            'tl.load(LSE + offs_m1, mask=valid_m, other=float("-inf"))',
+            template,
+        )
+        self.assertIn(
+            "& valid_m[:, None]\n            & (offs_n1[None, :] < KV_LEN)",
+            template,
+        )
+        self.assertIn(
+            "tl.load(DELTA + offs_m1, mask=valid_m, other=0.0)",
+            template,
+        )
+        self.assertNotIn("lse = tl.load(LSE + offs_m1)\n", template)
+        self.assertNotIn("Di = tl.load(DELTA + offs_m1)\n", template)
+
     def test_backward_masks_missing_partial_block_before_loading(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
