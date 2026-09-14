@@ -1469,6 +1469,7 @@ def bwd_dkdv_block_mn(
         partial_block_idx = tl.load(
             arg_SPARSE_MASK_BLOCK_POS + block_pos_offset
         )
+        valid_partial_block = partial_block_idx >= 0
         safe_partial_block_idx = tl.maximum(partial_block_idx, 0)
 
         offs_m_local = offs_m1[:, None] - q_sparse_start
@@ -1478,8 +1479,14 @@ def bwd_dkdv_block_mn(
             + safe_partial_block_idx * SPARSE_MASK_STRIDE_BLK
         )
         mask_offsets = offs_m_local * SPARSE_MASK_STRIDE_M + offs_n_local
-        mask_mod_output = tl.load(mask_base + mask_offsets)
-        mask_mod_output = mask_mod_output & (partial_block_idx >= 0)
+        # A missing partial block is encoded as -1. Mask the memory access
+        # itself: clamping the index and filtering the loaded value afterwards
+        # still performs an invalid read when the compact mask has no block 0.
+        mask_mod_output = tl.load(
+            mask_base + mask_offsets,
+            mask=valid_partial_block,
+            other=False,
+        )
 {% else %}
         {{ modification(
             subgraph_number=2,
