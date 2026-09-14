@@ -3825,6 +3825,11 @@ def _register_npu_inductor_flex_attention():
                 owns_captured_grads=captured_grad_owner == "dkdv",
             ),
         )
+        # Keep the selected template output on the returned dK data path.  The
+        # original accumulation buffer is only a mutation argument; returning
+        # it directly lets Inductor schedule consumers without depending on
+        # the selected dK/dV template node.
+        broadcasted_grad_key_accum = dkdv_result
 
         dq_result, _ = autotune_select_algorithm(
             "flex_attention_backward_qmajor_dq",
@@ -3844,6 +3849,9 @@ def _register_npu_inductor_flex_attention():
                 owns_captured_grads=captured_grad_owner == "dq",
             ),
         )
+        # The selected dQ template node is the producer of the gradient.  Use
+        # it below so the backward return value carries that dependency.
+        grad_query = dq_result
 
         if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
             grad_key_accum = broadcasted_grad_key_accum
