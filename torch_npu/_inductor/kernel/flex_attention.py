@@ -498,6 +498,18 @@ def _has_sparse_block_mask(
     )
 
 
+def _keep_largest_supported_block_configs(
+    configs: list[dict], supported_configs: list[dict], block_key: str
+) -> list[dict]:
+    largest_block = max(
+        (config[block_key] for config in supported_configs),
+        default=None,
+    )
+    return [
+        config for config in configs if config[block_key] == largest_block
+    ]
+
+
 def _is_npu_device(device: Any) -> bool:
     try:
         return torch.device(device).type == "npu"
@@ -2368,6 +2380,18 @@ def _register_npu_inductor_flex_attention():
             sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
             kernel_options=kernel_options,
         )
+        supported_fwd_configs = generate_fwd_candidate_configs(
+            sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+            sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        )
+        # Smaller Q tiles have produced non-finite mask-out results on NPU.
+        # Timing-only autotuning cannot reject a numerically invalid choice, so
+        # keep the largest supported Q tile while preserving all KV candidates.
+        dict_configs = _keep_largest_supported_block_configs(
+            dict_configs,
+            supported_fwd_configs,
+            "BLOCK_M",
+        )
 
         if not dict_configs:
             raise RuntimeError(
@@ -3334,19 +3358,35 @@ def _register_npu_inductor_flex_attention():
         )
         if asymmetric_q_kv:
             # CP presents a local Q shard with gathered K/V. The current NPU
-            # backward template is only numerically safe when each sparse KV
-            # block remains intact; autotuned KV subtiles can produce invalid
-            # gradients for this asymmetric layout.
-            bwd_dq_dict_configs = [
-                cfg
-                for cfg in bwd_dq_dict_configs
-                if cfg["BLOCK_N2"] == SPARSE_KV_BLOCK_SIZE
-            ]
-            bwd_dkdv_dict_configs = [
-                cfg
-                for cfg in bwd_dkdv_dict_configs
-                if cfg["BLOCK_N1"] == SPARSE_KV_BLOCK_SIZE
-            ]
+            # backward template has only been numerically reliable with the
+            # largest supported KV tile. Timing-only autotuning cannot reject
+            # a smaller tile that produces invalid gradients.
+            supported_bwd_dq_configs = generate_bwd_candidate_configs(
+                sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+                sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+                mode=FlexMode.BWDDQ,
+            )
+            supported_bwd_dkdv_configs = generate_bwd_candidate_configs(
+                sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
+                sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
+                mode=FlexMode.BWDDKDV,
+            )
+            bwd_dq_dict_configs = _keep_largest_supported_block_configs(
+                bwd_dq_dict_configs,
+                supported_bwd_dq_configs,
+                "BLOCK_N2",
+            )
+            bwd_dkdv_dict_configs = _keep_largest_supported_block_configs(
+                bwd_dkdv_dict_configs,
+                supported_bwd_dkdv_configs,
+                "BLOCK_N1",
+            )
+            if not bwd_dq_dict_configs or not bwd_dkdv_dict_configs:
+                raise RuntimeError(
+                    "No numerically supported asymmetric flex attention "
+                    "backward tiling configs remain after applying kernel "
+                    "options."
+                )
 
         tasklist_reduce_ub_safe = True
         if (
