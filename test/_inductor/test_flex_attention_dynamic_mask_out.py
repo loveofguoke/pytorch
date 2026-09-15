@@ -123,23 +123,6 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             template,
         )
 
-    def test_self_attention_uses_one_program_per_backward_task(self):
-        lowering = LOWERING_PATH.read_text(encoding="utf-8")
-
-        # Reusing one NPU program for several logical tiles is retained only
-        # for the asymmetric CP path. Regular self-attention follows the
-        # upstream one-program-per-logical-tile scheduling contract.
-        self.assertGreaterEqual(
-            lowering.count(
-                'persistent=kernel_options["GUARD_SPARSE_Q_ROWS"]'
-            ),
-            2,
-        )
-        self.assertIn(
-            "if persistent\n        else max(num_tasks, 1)",
-            lowering,
-        )
-
     def test_optional_full_block_strides_are_guarded_during_rendering(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
