@@ -1391,17 +1391,11 @@ def _build_persistent_bwd_launch_meta(
     kv_heads_hint: int,
     num_key_value_hint: int,
     block_n1: int,
-    *,
-    persistent: bool,
 ) -> Dict[str, Union[int, bool]]:
     num_kv_blocks = (num_key_value_hint + block_n1 - 1) // block_n1
     num_tasks = num_kv_blocks * batch_size_hint * kv_heads_hint
     num_cube_core = max(int(npu_config.num_cube_core), 1)
-    launch_programs = (
-        max(min(num_tasks, num_cube_core), 1)
-        if persistent
-        else max(num_tasks, 1)
-    )
+    launch_programs = max(min(num_tasks, num_cube_core), 1)
     tasks_per_program = (num_tasks + launch_programs - 1) // launch_programs
 
     log.info(
@@ -1421,7 +1415,7 @@ def _build_persistent_bwd_launch_meta(
     )
 
     return {
-        "PERSISTENT_MODE": persistent,
+        "PERSISTENT_MODE": True,
         "NUM_TASKS": num_tasks,
         "NUM_KV_BLOCKS": num_kv_blocks,
         "LAUNCH_PROGRAMS": launch_programs,
@@ -1434,17 +1428,11 @@ def _build_qmajor_dq_launch_meta(
     q_heads_hint: int,
     num_queries_hint: int,
     block_m: int,
-    *,
-    persistent: bool,
 ) -> dict[str, int]:
     num_q_blocks = (num_queries_hint + block_m - 1) // block_m
     num_tasks = num_q_blocks * batch_size_hint * q_heads_hint
     num_cube_core = max(int(npu_config.num_cube_core), 1)
-    launch_programs = (
-        max(min(num_tasks, num_cube_core), 1)
-        if persistent
-        else max(num_tasks, 1)
-    )
+    launch_programs = max(min(num_tasks, num_cube_core), 1)
 
     log.info(
         "[qmajor-dq-bwd] Computing launch meta with BLOCK_M2=%d: "
@@ -3406,7 +3394,6 @@ def _register_npu_inductor_flex_attention():
                     q_heads_hint=bwd_q_heads_hint,
                     num_queries_hint=bwd_num_queries_hint,
                     block_m=cfg["BLOCK_M2"],
-                    persistent=kernel_options["GUARD_SPARSE_Q_ROWS"],
                 )
             )
             return opts
@@ -3425,7 +3412,6 @@ def _register_npu_inductor_flex_attention():
                     kv_heads_hint=bwd_kv_heads_hint,
                     num_key_value_hint=bwd_num_key_value_hint,
                     block_n1=cfg["BLOCK_N1"],
-                    persistent=kernel_options["GUARD_SPARSE_Q_ROWS"],
                 )
             )
             return opts
