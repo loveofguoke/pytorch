@@ -1395,10 +1395,13 @@ def patch_algorithm_selector() -> None:
                             futures[future].hash_key()
                         )
                         counters["inductor"]["select_algorithm_num_precompiles"] += 1
+                        elapsed_time = elapsed_times.get(
+                            future, time.time() - start_times[future]
+                        )
                         log.info(
                             "Precompiling benchmark choice %s took %.02fs",
                             _format_choice_debug_label(futures[future]),
-                            elapsed_times[future],
+                            elapsed_time,
                         )
 
                 executor.shutdown(wait=True)
