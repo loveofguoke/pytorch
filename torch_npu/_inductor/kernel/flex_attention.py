@@ -3329,6 +3329,25 @@ def _register_npu_inductor_flex_attention():
             kernel_options=kernel_options,
         )
 
+        asymmetric_q_kv = not V.graph.sizevars.evaluate_expr(
+            sympy.Eq(seq_len_q, seq_len_kv)
+        )
+        if asymmetric_q_kv:
+            # CP presents a local Q shard with gathered K/V. The current NPU
+            # backward template is only numerically safe when each sparse KV
+            # block remains intact; autotuned KV subtiles can produce invalid
+            # gradients for this asymmetric layout.
+            bwd_dq_dict_configs = [
+                cfg
+                for cfg in bwd_dq_dict_configs
+                if cfg["BLOCK_N2"] == SPARSE_KV_BLOCK_SIZE
+            ]
+            bwd_dkdv_dict_configs = [
+                cfg
+                for cfg in bwd_dkdv_dict_configs
+                if cfg["BLOCK_N1"] == SPARSE_KV_BLOCK_SIZE
+            ]
+
         tasklist_reduce_ub_safe = True
         if (
             flexattention_mask_out
@@ -3358,9 +3377,7 @@ def _register_npu_inductor_flex_attention():
         # Context parallelism can present local Q with gathered K/V metadata.
         # Only that asymmetric layout needs runtime guards for sparse query rows;
         # preserve the original unmasked divisible loads for self-attention.
-        kernel_options["GUARD_SPARSE_Q_ROWS"] = not V.graph.sizevars.evaluate_expr(
-            sympy.Eq(seq_len_q, seq_len_kv)
-        )
+        kernel_options["GUARD_SPARSE_Q_ROWS"] = asymmetric_q_kv
         original_kernel_options = kernel_options.copy()
 
         def make_bwd_base_kernel_options(cfg: dict) -> dict:
