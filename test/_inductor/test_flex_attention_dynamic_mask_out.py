@@ -33,6 +33,26 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             template,
         )
 
+    def test_cp_backward_keeps_sparse_kv_blocks_intact(self):
+        lowering = LOWERING_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "asymmetric_q_kv = not V.graph.sizevars.evaluate_expr(\n"
+            "            sympy.Eq(seq_len_q, seq_len_kv)\n"
+            "        )",
+            lowering,
+        )
+        self.assertIn(
+            'if cfg["BLOCK_N2"] == SPARSE_KV_BLOCK_SIZE', lowering
+        )
+        self.assertIn(
+            'if cfg["BLOCK_N1"] == SPARSE_KV_BLOCK_SIZE', lowering
+        )
+        self.assertIn(
+            'kernel_options["GUARD_SPARSE_Q_ROWS"] = asymmetric_q_kv',
+            lowering,
+        )
+
     def test_backward_preserves_divisible_self_attention_loads(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
