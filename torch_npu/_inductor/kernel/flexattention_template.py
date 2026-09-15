@@ -1042,7 +1042,7 @@ flex_attention_backward_qmajor_dq_source = r"""
             mask_offsets = offs_m_local * SPARSE_MASK_STRIDE_M + offs_n_local
             mask_mod_output = tl.load(
                 arg_SPARSE_MASK + flat_blk * SPARSE_MASK_STRIDE_BLK + mask_offsets
-            )
+            ) != 0
 {% else %}
             {{ modification(
                 subgraph_number=2,
@@ -1487,13 +1487,13 @@ def bwd_dkdv_block_mn(
                 mask_base + mask_offsets,
                 mask=valid_partial_block,
                 other=False,
-            )
+            ) != 0
             mask_mod_output = mask_mod_output & valid_m[:, None]
             mask_mod_output = mask_mod_output & (offs_n1[None, :] < KV_LEN)
         else:
             # Preserve the original self-attention codegen. Block zero exists
             # for this layout, so a missing entry can be filtered after load.
-            mask_mod_output = tl.load(mask_base + mask_offsets)
+            mask_mod_output = tl.load(mask_base + mask_offsets) != 0
             mask_mod_output = mask_mod_output & (partial_block_idx >= 0)
 {% else %}
         {{ modification(
