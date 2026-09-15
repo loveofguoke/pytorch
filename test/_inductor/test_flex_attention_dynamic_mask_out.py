@@ -1,3 +1,4 @@
+import ast
 import unittest
 from pathlib import Path
 
@@ -33,7 +34,7 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             template,
         )
 
-    def test_cp_backward_keeps_sparse_kv_blocks_intact(self):
+    def test_cp_backward_uses_largest_supported_kv_tiles(self):
         lowering = LOWERING_PATH.read_text(encoding="utf-8")
 
         self.assertIn(
@@ -43,14 +44,98 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             lowering,
         )
         self.assertIn(
-            'if cfg["BLOCK_N2"] == SPARSE_KV_BLOCK_SIZE', lowering
+            'supported_bwd_dq_configs,\n                "BLOCK_N2"',
+            lowering,
         )
         self.assertIn(
-            'if cfg["BLOCK_N1"] == SPARSE_KV_BLOCK_SIZE', lowering
+            'supported_bwd_dkdv_configs,\n                "BLOCK_N1"',
+            lowering,
         )
         self.assertIn(
             'kernel_options["GUARD_SPARSE_Q_ROWS"] = asymmetric_q_kv',
             lowering,
+        )
+        self.assertIn(
+            '"No numerically supported asymmetric flex attention "',
+            lowering,
+        )
+
+    def test_mask_out_uses_largest_supported_risky_axis_tiles(self):
+        lowering = LOWERING_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "dict_configs = _keep_largest_supported_block_configs(",
+            lowering,
+        )
+        self.assertIn(
+            'supported_bwd_dq_configs,\n                "BLOCK_N2"',
+            lowering,
+        )
+        self.assertIn(
+            'supported_bwd_dkdv_configs,\n                "BLOCK_N1"',
+            lowering,
+        )
+
+    def test_largest_block_filter_preserves_nonempty_candidate_sets(self):
+        tree = ast.parse(LOWERING_PATH.read_text(encoding="utf-8"))
+        helper = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_keep_largest_supported_block_configs"
+        )
+        namespace = {}
+        exec(
+            compile(
+                ast.Module(body=[helper], type_ignores=[]),
+                str(LOWERING_PATH),
+                "exec",
+            ),
+            namespace,
+        )
+        keep_largest = namespace["_keep_largest_supported_block_configs"]
+
+        self.assertEqual(keep_largest([], [], "BLOCK_M"), [])
+        for sparse_block_size in (16, 32, 64, 128, 256):
+            blocks = [
+                block
+                for block in (128, 64, 32, 16)
+                if block <= sparse_block_size
+                and sparse_block_size % block == 0
+            ]
+            configs = [
+                {"BLOCK_M": block_m, "BLOCK_N": block_n}
+                for block_m in blocks
+                for block_n in blocks
+            ]
+            selected = keep_largest(configs, configs, "BLOCK_M")
+            self.assertTrue(selected)
+            self.assertEqual(
+                {config["BLOCK_M"] for config in selected},
+                {max(blocks)},
+            )
+
+        supported_configs = [
+            {"BLOCK_M": block_m, "BLOCK_N": 128}
+            for block_m in (128, 64, 32, 16)
+        ]
+        unsafe_explicit_config = [{"BLOCK_M": 32, "BLOCK_N": 128}]
+        self.assertEqual(
+            keep_largest(
+                unsafe_explicit_config,
+                supported_configs,
+                "BLOCK_M",
+            ),
+            [],
+        )
+        safe_explicit_config = [{"BLOCK_M": 128, "BLOCK_N": 32}]
+        self.assertEqual(
+            keep_largest(
+                safe_explicit_config,
+                supported_configs,
+                "BLOCK_M",
+            ),
+            safe_explicit_config,
         )
 
     def test_backward_preserves_divisible_self_attention_loads(self):
