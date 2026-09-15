@@ -101,6 +101,28 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             template,
         )
 
+    def test_mask_out_cache_loads_restore_boolean_dtype(self):
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+        # The compact mask is deliberately stored as int8. Every consumer
+        # must convert the loaded byte back to a predicate before passing it
+        # to tl.where; newer Triton versions reject integer conditions.
+        self.assertIn(
+            "arg_SPARSE_MASK + flat_blk * SPARSE_MASK_STRIDE_BLK + mask_offsets\n"
+            "            ) != 0",
+            template,
+        )
+        self.assertIn(
+            "mask=valid_partial_block,\n"
+            "                other=False,\n"
+            "            ) != 0",
+            template,
+        )
+        self.assertIn(
+            "mask_mod_output = tl.load(mask_base + mask_offsets) != 0",
+            template,
+        )
+
     def test_optional_full_block_strides_are_guarded_during_rendering(self):
         template = TEMPLATE_PATH.read_text(encoding="utf-8")
 
