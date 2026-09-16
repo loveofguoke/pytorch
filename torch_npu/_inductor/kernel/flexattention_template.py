@@ -740,6 +740,9 @@ def forward_block_mn_full(
         out="qk"
     ) | indent_except_first(1) }}
 
+    if CHECK_BLOCK_BOUNDARY:
+        post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
+
 {% if not TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
     if True:
         {{ modification(
@@ -1152,8 +1155,8 @@ flex_attention_backward_qmajor_dq_source = r"""
                 mask_mod_output = mask_mod_output & (offs_m[:, None] < Q_LEN) & (offs_n[None, :] < KV_LEN)
 {% endif %}
 {% if TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
-                # full block don't need
-                # qk = tl.where(offs_n[None, :] < KV_LEN, qk, float("-inf"))
+                # A full sparse block can still contain padded KV lanes.
+                qk = tl.where(offs_n[None, :] < KV_LEN, qk, float("-inf"))
                 p = tl.math.exp(qk - lse[:, None])
 {% else %}
                 pre_mod_scores = qk
@@ -1518,7 +1521,9 @@ def bwd_dkdv_block_mn(
 {% endif %}
 
 {% if TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
-    pT = tl.math.exp(qkT - lse[:, None]).to(MATMUL_PRECISION)
+    # Keep probabilities in FP32 for dS, as in the upstream backward template.
+    # Only the dot-product operand for dV is cast to MATMUL_PRECISION.
+    pT = tl.math.exp(qkT - lse[:, None])
 {% else %}
     pT = tl.math.exp(post_mod_scores - lse[:, None])
 {% endif %}
@@ -1655,8 +1660,10 @@ def bwd_dkdv_full_block_mn(
 {% endif %}
 
 {% if TORCHINDUCTOR_FLEXATTENTION_MASKOUT %}
-    if CHECK_BLOCK_BOUNDARY:
-        qkT = tl.where(offs_n1[None, :] < KV_LEN, qkT, float("-inf"))
+    # Padded query rows participate in the dK/dV reduction, even for full blocks.
+    qkT = tl.where(
+        valid_m[:, None] & (offs_n1[None, :] < KV_LEN), qkT, float("-inf")
+    )
     pT = tl.math.exp(qkT - lse[:, None])
 {% else %}
     pre_mod_scores = qkT
