@@ -2384,13 +2384,18 @@ def _register_npu_inductor_flex_attention():
             sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
             sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
         )
-        # Smaller Q tiles have produced non-finite mask-out results on NPU.
-        # Timing-only autotuning cannot reject a numerically invalid choice, so
-        # keep the largest supported Q tile while preserving all KV candidates.
+        # Smaller Q or KV tiles have produced non-finite mask-out results on
+        # NPU. Timing-only autotuning cannot reject a numerically invalid
+        # choice, so only expose the largest supported tile on both axes.
         dict_configs = _keep_largest_supported_block_configs(
             dict_configs,
             supported_fwd_configs,
             "BLOCK_M",
+        )
+        dict_configs = _keep_largest_supported_block_configs(
+            dict_configs,
+            supported_fwd_configs,
+            "BLOCK_N",
         )
 
         if not dict_configs:
@@ -3359,8 +3364,8 @@ def _register_npu_inductor_flex_attention():
         if asymmetric_q_kv:
             # CP presents a local Q shard with gathered K/V. The current NPU
             # backward template has only been numerically reliable with the
-            # largest supported KV tile. Timing-only autotuning cannot reject
-            # a smaller tile that produces invalid gradients.
+            # largest supported Q and KV tiles. Timing-only autotuning cannot
+            # reject a smaller tile that produces invalid gradients.
             supported_bwd_dq_configs = generate_bwd_candidate_configs(
                 sparse_q_block_size=SPARSE_Q_BLOCK_SIZE,
                 sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
@@ -3374,7 +3379,17 @@ def _register_npu_inductor_flex_attention():
             bwd_dq_dict_configs = _keep_largest_supported_block_configs(
                 bwd_dq_dict_configs,
                 supported_bwd_dq_configs,
+                "BLOCK_M2",
+            )
+            bwd_dq_dict_configs = _keep_largest_supported_block_configs(
+                bwd_dq_dict_configs,
+                supported_bwd_dq_configs,
                 "BLOCK_N2",
+            )
+            bwd_dkdv_dict_configs = _keep_largest_supported_block_configs(
+                bwd_dkdv_dict_configs,
+                supported_bwd_dkdv_configs,
+                "BLOCK_M1",
             )
             bwd_dkdv_dict_configs = _keep_largest_supported_block_configs(
                 bwd_dkdv_dict_configs,

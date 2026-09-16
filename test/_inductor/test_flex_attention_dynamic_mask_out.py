@@ -44,7 +44,15 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             lowering,
         )
         self.assertIn(
+            'supported_bwd_dq_configs,\n                "BLOCK_M2"',
+            lowering,
+        )
+        self.assertIn(
             'supported_bwd_dq_configs,\n                "BLOCK_N2"',
+            lowering,
+        )
+        self.assertIn(
+            'supported_bwd_dkdv_configs,\n                "BLOCK_M1"',
             lowering,
         )
         self.assertIn(
@@ -68,7 +76,19 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
             lowering,
         )
         self.assertIn(
+            'supported_fwd_configs,\n            "BLOCK_N"',
+            lowering,
+        )
+        self.assertIn(
+            'supported_bwd_dq_configs,\n                "BLOCK_M2"',
+            lowering,
+        )
+        self.assertIn(
             'supported_bwd_dq_configs,\n                "BLOCK_N2"',
+            lowering,
+        )
+        self.assertIn(
+            'supported_bwd_dkdv_configs,\n                "BLOCK_M1"',
             lowering,
         )
         self.assertIn(
@@ -136,6 +156,14 @@ class TestFlexAttentionDynamicMaskOutSource(unittest.TestCase):
                 "BLOCK_M",
             ),
             safe_explicit_config,
+        )
+        self.assertEqual(
+            keep_largest(
+                safe_explicit_config,
+                supported_configs,
+                "BLOCK_N",
+            ),
+            [],
         )
 
     def test_backward_preserves_divisible_self_attention_loads(self):
