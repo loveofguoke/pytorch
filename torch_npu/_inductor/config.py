@@ -119,10 +119,16 @@ def _obtain_precompile_thread_num() -> int:
     by env TORCHINDUCTOR_COMPILE_THREADS; here, we obtain precompile_thread_num
     via default_value or env TORCHNPU_PRECOMPILE_THREADS.
     """
-    # by default, inductor_config.compile_threads = 32 in torch/inductor/config.py
-    precompile_thread_num = os.cpu_count() // max(inductor_config.compile_threads, 2)
-    # by default, we set maximum of precompile_thread_num = 32
-    precompile_thread_num = max(precompile_thread_num, 32)
+    # Keep NPU precompile workers within both the available CPU share and the
+    # documented maximum. This is especially important when every PP rank
+    # compiles FlexAttention choices concurrently during stage initialization.
+    precompile_thread_num = max(
+        1,
+        min(
+            os.cpu_count() // max(inductor_config.compile_threads, 2),
+            32,
+        ),
+    )
 
     thread_num_str = os.environ.get("TORCHNPU_PRECOMPILE_THREADS", "")
     if thread_num_str.strip():

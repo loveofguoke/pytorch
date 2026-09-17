@@ -1379,32 +1379,57 @@ def patch_algorithm_selector() -> None:
             @restore_stdout_stderr()
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
-                for future in as_completed(
-                    futures,
-                    timeout=precompilation_timeout_seconds,
-                ):
-                    if e := future.exception():
+                try:
+                    for future in as_completed(
+                        futures,
+                        timeout=precompilation_timeout_seconds,
+                    ):
+                        if e := future.exception():
+                            _log_autotune_error(
+                                "Precompile failed",
+                                e,
+                                futures[future],
+                                ignored=False,
+                            )
+                        else:
+                            successful_precompile_choice_hashes.add(
+                                futures[future].hash_key()
+                            )
+                            counters["inductor"][
+                                "select_algorithm_num_precompiles"
+                            ] += 1
+                            elapsed_time = elapsed_times.get(
+                                future, time.time() - start_times[future]
+                            )
+                            log.info(
+                                "Precompiling benchmark choice %s took %.02fs",
+                                _format_choice_debug_label(futures[future]),
+                                elapsed_time,
+                            )
+                except TimeoutError:
+                    completed_futures = OrderedSet(
+                        future for future in futures if future.done()
+                    )
+                    remaining_futures = OrderedSet(futures) - completed_futures
+                    log.warning(
+                        "Precompilation timeout after %ds: %d of %d futures "
+                        "did not complete",
+                        precompilation_timeout_seconds,
+                        len(remaining_futures),
+                        len(futures),
+                    )
+                    for future in remaining_futures:
                         _log_autotune_error(
-                            "Precompile failed",
-                            e,
+                            "Precompile timed out",
+                            TimeoutError(
+                                "Precompilation timed out after "
+                                f"{precompilation_timeout_seconds}s"
+                            ),
                             futures[future],
-                            ignored=False,
+                            ignored=True,
                         )
-                    else:
-                        successful_precompile_choice_hashes.add(
-                            futures[future].hash_key()
-                        )
-                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
-                        elapsed_time = elapsed_times.get(
-                            future, time.time() - start_times[future]
-                        )
-                        log.info(
-                            "Precompiling benchmark choice %s took %.02fs",
-                            _format_choice_debug_label(futures[future]),
-                            elapsed_time,
-                        )
-
-                executor.shutdown(wait=True)
+                finally:
+                    executor.shutdown(wait=True)
 
             if not select_first_compilable_only:
                 self.precompile_cache[precompile_key] = wait_on_futures
