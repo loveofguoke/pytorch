@@ -68,6 +68,7 @@ class FlexAttentionConfigGenerator:
     """Generate block tiling candidates without shape or dtype dependencies."""
 
     BLOCK_SIZE_CANDIDATES = [128, 64, 32, 16]
+    _BACKWARD_MODES = (FlexMode.BWD, FlexMode.BWDDQ, FlexMode.BWDDKDV)
 
     def __init__(
         self,
@@ -103,6 +104,14 @@ class FlexAttentionConfigGenerator:
         block_m_keys, block_n_keys = self._block_option_keys()
         user_block_m = self._resolve_user_block(block_m_keys)
         user_block_n = self._resolve_user_block(block_n_keys)
+        # PyTorch keeps BLOCK_N=128 out of the default backward search because
+        # it can produce ULFs. Keep it available for explicit exhaustive use.
+        if self._omit_unsafe_default_backward_block_n(
+            user_block_m, user_block_n
+        ):
+            self.valid_block_n = [
+                block for block in self.valid_block_n if block != 128
+            ]
         block_m_sparse_sizes = (self.sparse_q_block_size,)
         block_n_sparse_sizes = (self.sparse_kv_block_size,)
         if self.mode == FlexMode.BWD:
@@ -119,6 +128,25 @@ class FlexAttentionConfigGenerator:
             user_block_n,
             block_n_keys,
             block_n_sparse_sizes,
+        )
+
+    def _omit_unsafe_default_backward_block_n(
+        self,
+        user_block_m: Optional[int],
+        user_block_n: Optional[int],
+    ) -> bool:
+        """Match PyTorch's default backward search-space safety policy."""
+        return (
+            self.mode in self._BACKWARD_MODES
+            and user_block_n is None
+            and not (self.mode == FlexMode.BWD and user_block_m == 128)
+            and getattr(inductor_config, "max_autotune", False)
+            and getattr(
+                inductor_config,
+                "max_autotune_flex_search_space",
+                "DEFAULT",
+            ).upper()
+            != "EXHAUSTIVE"
         )
 
     def _block_option_keys(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
