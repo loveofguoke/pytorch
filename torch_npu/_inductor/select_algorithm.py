@@ -8,7 +8,7 @@ import logging
 import math
 import os
 import time
-from concurrent.futures import as_completed, ThreadPoolExecutor, Future
+from concurrent.futures import as_completed, Future, ThreadPoolExecutor
 from io import StringIO
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
@@ -207,7 +207,7 @@ def _select_first_usable_choice_in_order(
         if choice in timings:
             return choice
     for choice in choices:
-        if choice.hash_key() in successful_precompile_choice_hashes:
+        if choice.kernel_hash_key() in successful_precompile_choice_hashes:
             return choice
     tiling_choices = [
         (tiling_key, choice)
@@ -1335,43 +1335,63 @@ def patch_algorithm_selector() -> None:
             # different than the original values. we explicitly restore the state
             # here to avoid this issue.
 
-            def precompile_with_captured_stdout(choice):
+            def precompile_with_captured_stdout(choice) -> tuple[None, int]:
                 log.debug("Precompiling choice with captured stdout: %s", choice)
+                start_ns = time.time_ns()
                 with restore_stdout_stderr():
                     choice.precompile()
+                elapsed_ns = time.time_ns() - start_ns
+                # AsyncCompile.triton() returns the same two-item shape.
+                return None, elapsed_ns // 1000
 
             def on_complete(future):
-                assert future in start_times
-                elapsed_times[future] = time.time() - start_times[future]
-                log.debug(
-                    "Precompilation complete for future: %s, elapsed time: %.02fs",
-                    future,
-                    elapsed_times[future],
-                )
+                if not future.exception():
+                    _, precompile_elapsed_us = future.result()
+                    elapsed_times[future] = precompile_elapsed_us / 1e6
+                    log.debug(
+                        "Precompilation complete for future: %s, elapsed time: %.02fs",
+                        future,
+                        elapsed_times[future],
+                    )
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
             async_compile = torch._inductor.async_compile.AsyncCompile()
 
             futures: dict[Future[Any], ChoiceCaller] = {}
-            start_times: dict[Future[Any], float] = {}
             elapsed_times: dict[Future[Any], float] = {}
 
             # Some choices only differ in runtime arguments, so we
             # skip a choice if it has the same hash as a previously seen choice
-            seen_choices: OrderedSet[ChoiceCaller] = OrderedSet()
+            seen_choices: OrderedSet[str] = OrderedSet()
             for c in choices:
                 # Skip choices which we have already issued a precompile
-                if c.hash_key() in seen_choices:
+                if c.kernel_hash_key() in seen_choices:
                     log.debug("Skipping already seen choice: %s", c)
                     continue
                 else:
-                    seen_choices.add(c.hash_key())
+                    seen_choices.add(c.kernel_hash_key())
 
                 if hasattr(c, "precompile"):
-                    future = executor.submit(precompile_with_captured_stdout, c)
-                    log.debug("Submitted precompile for choice: %s", c)
+                    triton_npu_choice = isinstance(
+                        c, TritonTemplateCaller
+                    ) and isinstance(c.bmreq, TritonGPUBenchmarkRequest)
+                    if triton_npu_choice and async_compile.use_process_pool():
+                        with open(c.bmreq.module_path, encoding="utf-8") as file:
+                            source_code = file.read()
+                        future = async_compile.triton(
+                            kernel_name=c.bmreq.kernel_name,
+                            source_code=source_code,
+                        ).future
+                        log.debug(
+                            "Submitted Triton async compile for choice: %s", c
+                        )
+                    else:
+                        future = executor.submit(
+                            precompile_with_captured_stdout,
+                            c,
+                        )
+                        log.debug("Submitted precompile for choice: %s", c)
 
-                    start_times[future] = time.time()
                     future.add_done_callback(on_complete)
                     futures[future] = c
 
@@ -1384,27 +1404,26 @@ def patch_algorithm_selector() -> None:
                         futures,
                         timeout=precompilation_timeout_seconds,
                     ):
+                        choice = futures[future]
                         if e := future.exception():
+                            choice.mark_failed()
                             _log_autotune_error(
                                 "Precompile failed",
                                 e,
-                                futures[future],
+                                choice,
                                 ignored=False,
                             )
                         else:
                             successful_precompile_choice_hashes.add(
-                                futures[future].hash_key()
+                                choice.kernel_hash_key()
                             )
                             counters["inductor"][
                                 "select_algorithm_num_precompiles"
                             ] += 1
-                            elapsed_time = elapsed_times.get(
-                                future, time.time() - start_times[future]
-                            )
                             log.info(
                                 "Precompiling benchmark choice %s took %.02fs",
-                                _format_choice_debug_label(futures[future]),
-                                elapsed_time,
+                                _format_choice_debug_label(choice),
+                                elapsed_times.get(future, float("nan")),
                             )
                 except TimeoutError:
                     completed_futures = OrderedSet(
@@ -1419,13 +1438,15 @@ def patch_algorithm_selector() -> None:
                         len(futures),
                     )
                     for future in remaining_futures:
+                        choice = futures[future]
+                        choice.mark_failed()
                         _log_autotune_error(
                             "Precompile timed out",
                             TimeoutError(
                                 "Precompilation timed out after "
                                 f"{precompilation_timeout_seconds}s"
                             ),
-                            futures[future],
+                            choice,
                             ignored=True,
                         )
                 finally:
@@ -1500,7 +1521,9 @@ def patch_algorithm_selector() -> None:
                 try:
                     with restore_stdout_stderr():
                         choice.precompile()
-                    successful_precompile_choice_hashes.add(choice.hash_key())
+                    successful_precompile_choice_hashes.add(
+                        choice.kernel_hash_key()
+                    )
                     counters["inductor"]["select_algorithm_num_precompiles"] += 1
                     selected_choice = choice
                     break
