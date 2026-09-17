@@ -58,29 +58,28 @@ class TestPrecompileControls(unittest.TestCase):
         with patch.dict(os.environ, {"TORCHNPU_PRECOMPILE_THREADS": "7"}):
             self.assertEqual(get_worker_count(), 7)
 
-    def test_precompile_timeout_is_degraded_instead_of_propagated(self):
+    def test_precompile_matches_upstream_triton_dispatch(self):
         tree = ast.parse(SELECT_ALGORITHM_PATH.read_text(encoding="utf-8"))
-        wait_on_futures = next(
+        precompile = next(
             node
             for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "precompile"
+        )
+        wait_on_futures = next(
+            node
+            for node in ast.walk(precompile)
             if isinstance(node, ast.FunctionDef) and node.name == "wait_on_futures"
         )
 
-        timeout_handlers = [
-            handler
-            for handler in ast.walk(wait_on_futures)
-            if isinstance(handler, ast.ExceptHandler)
-            and isinstance(handler.type, ast.Name)
-            and handler.type.id == "TimeoutError"
-        ]
-        self.assertEqual(len(timeout_handlers), 1)
+        precompile_source = ast.unparse(precompile)
+        self.assertIn("c.kernel_hash_key()", precompile_source)
+        self.assertIn("async_compile.triton", precompile_source)
+        self.assertIn("async_compile.use_process_pool()", precompile_source)
+        self.assertNotIn("c.hash_key() in seen_choices", precompile_source)
 
-        handler_calls = {
-            node.func.id
-            for node in ast.walk(timeout_handlers[0])
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        }
-        self.assertIn("_log_autotune_error", handler_calls)
+        wait_source = ast.unparse(wait_on_futures)
+        self.assertIn("choice.mark_failed()", wait_source)
+        self.assertIn("as_completed", wait_source)
 
 
 if __name__ == "__main__":
