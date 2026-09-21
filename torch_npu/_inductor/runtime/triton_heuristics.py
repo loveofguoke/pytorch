@@ -1314,7 +1314,14 @@ class NPUCachingAutotuner(CachingAutotuner):
         ):
             return do_bench_using_profiling_npu(kernel_call, rep=1)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=1, device_type='npu')
+        # Candidate runs use cloned mutable arguments and reset outputs before
+        # every launch, matching PyTorch's vetted deterministic autotuning path.
+        return benchmarker.benchmark_gpu(
+            kernel_call,
+            rep=1,
+            device_type='npu',
+            is_vetted_benchmarking=True,
+        )
 
     def _profile_batch_benchmark(self, kernel_funcs):
         def delete_file(base_path):

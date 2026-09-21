@@ -19,6 +19,7 @@ from torch_npu._inductor.codegen.triton import (
     NPUTritonKernel,
 )
 from torch_npu._inductor.runtime.triton_heuristics import (
+    NPUCachingAutotuner,
     _create_launcher_grid,
     _remap_fallback_block_subs,
 )
@@ -104,6 +105,28 @@ class TestSchedulingContract(TestCase):
         source = inspect.getsource(NPUIndexTritonKernel.create_inductor_meta)
         self.assertNotIn("requires_no_linear_block_remap", source)
         self.assertNotIn("inductor_" + "ascend_linear_mode", source)
+
+    def test_autotune_benchmark_is_vetted_for_deterministic_mode(self):
+        autotuner = object.__new__(NPUCachingAutotuner)
+        device_interface = mock.Mock()
+        device_interface.current_device.return_value = 0
+        device_interface.get_raw_stream.return_value = "stream"
+        autotuner.get_device_interface = mock.Mock(return_value=device_interface)
+        autotuner.inductor_meta = {}
+
+        with mock.patch(
+            "torch_npu._inductor.runtime.triton_heuristics."
+            "benchmarker.benchmark_gpu",
+            return_value=1.0,
+        ) as benchmark_gpu:
+            result = autotuner._bench_with_launch_args(
+                mock.Mock(),
+                (),
+                (),
+            )
+
+        self.assertEqual(result, 1.0)
+        self.assertTrue(benchmark_gpu.call_args.kwargs["is_vetted_benchmarking"])
 
 
 if __name__ == "__main__":
