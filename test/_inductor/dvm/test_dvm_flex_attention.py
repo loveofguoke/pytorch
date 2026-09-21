@@ -10,18 +10,19 @@ class TestDVMFlexAttention(unittest.TestCase):
     def test_uses_npu_triton_templates(self):
         script = textwrap.dedent(
             r"""
+            import inspect
             import math
             import os
             import sys
 
             import torch
             import torch_npu
-            from torch._inductor import lowering
             from torch._inductor.utils import run_and_get_code
             from torch.nn.attention.flex_attention import (
                 create_block_mask,
                 flex_attention,
             )
+            from torch_npu._inductor.kernel import flex_attention as npu_flex
 
             try:
                 __import__("torch_npu._C.dvm")
@@ -29,11 +30,13 @@ class TestDVMFlexAttention(unittest.TestCase):
                 print(f"__SKIP__: dvm is not available: {exc}")
                 sys.exit(0)
 
-            assert getattr(
-                lowering.make_pointwise,
-                "_torch_npu_accepts_origin_fn",
-                False,
-            )
+            subgraph_lowering = npu_flex._get_flex_subgraph_lowering_module()
+            assert subgraph_lowering.__name__.endswith(
+                "npu.inductor_patch.lowering"
+            ), subgraph_lowering.__name__
+            assert "origin_fn" in inspect.signature(
+                subgraph_lowering.make_pointwise
+            ).parameters
 
 
             torch.npu.set_device(0)

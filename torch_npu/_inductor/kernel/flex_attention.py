@@ -689,6 +689,27 @@ def patch_flex_attention() -> None:
         flex_attention_module.create_block_mask = create_block_mask_with_metadata
 
 
+def _get_flex_subgraph_lowering_module():
+    """Return the lowering implementation used by the selected NPU backend.
+
+    DVM/MLIR keeps its traced-graph-aware pointwise and index builders in the
+    Ascend NPU IR lowering module.  The operator registry may already contain
+    DVM wrappers even when ``torch._inductor.lowering`` still exposes PyTorch's
+    original helper functions, so selecting helpers from that public module can
+    create a mixed lowering graph.
+    """
+    if os.getenv("TORCHINDUCTOR_NPU_BACKEND", "default") in ("dvm", "mlir"):
+        from torch_npu._inductor.ascend_npu_ir.ascend_npu_ir.npu.inductor_patch import (
+            lowering as npu_lowering,
+        )
+
+        return npu_lowering
+
+    from torch._inductor import lowering
+
+    return lowering
+
+
 def _get_flex_attention_additional_lowerings():
     """
     Get additional lowerings for flex_attention subgraph.
@@ -696,13 +717,12 @@ def _get_flex_attention_additional_lowerings():
     These lowerings allow supported fallback operations to be lowered as pointwise
     ops in the score_mod and mask_mod subgraphs.
     """
-    from torch._inductor import lowering
-
+    lowering = _get_flex_subgraph_lowering_module()
     additional_lowerings = {}
 
     def make_pointwise_for_aten(fn, aten_fn):
         make_pointwise = lowering.make_pointwise
-        if getattr(make_pointwise, "_torch_npu_accepts_origin_fn", False):
+        if lowering.__name__.endswith("npu.inductor_patch.lowering"):
             return make_pointwise(fn, origin_fn=aten_fn)
         return make_pointwise(fn)
 
