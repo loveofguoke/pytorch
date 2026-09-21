@@ -29,8 +29,29 @@ class TestDVMFlexAttention(unittest.TestCase):
                 sys.exit(0)
 
 
-            def causal_mask(_batch, _head, q_idx, kv_idx):
-                return q_idx >= kv_idx
+            torch.npu.set_device(0)
+            sequence_length = 128
+            allowed = torch.tril(
+                torch.ones(
+                    (sequence_length, sequence_length),
+                    device="npu",
+                    dtype=torch.bool,
+                )
+            )
+
+
+            def bounded_captured_mask(_batch, _head, q_idx, kv_idx):
+                # Match GLM-5 DSA: compose explicit bounds with a captured
+                # dense mask lookup.  This exercises DVM pointwise tracing for
+                # aten.bitwise_and.Tensor and captured tensor indexing.
+                return (
+                    (q_idx < sequence_length)
+                    & (kv_idx < sequence_length)
+                    & allowed[
+                        q_idx.clamp(max=sequence_length - 1),
+                        kv_idx.clamp(max=sequence_length - 1),
+                    ]
+                )
 
 
             def dense_reference(query, key, value):
@@ -49,9 +70,8 @@ class TestDVMFlexAttention(unittest.TestCase):
                 return torch.matmul(probabilities, value.float()).to(query.dtype)
 
 
-            torch.npu.set_device(0)
             torch.manual_seed(2026)
-            shape = (1, 2, 128, 64)
+            shape = (1, 2, sequence_length, 64)
             inputs = [
                 torch.randn(
                     shape,
@@ -62,7 +82,7 @@ class TestDVMFlexAttention(unittest.TestCase):
                 for _ in range(3)
             ]
             block_mask = create_block_mask(
-                causal_mask,
+                bounded_captured_mask,
                 B=shape[0],
                 H=shape[1],
                 Q_LEN=shape[2],
@@ -230,27 +250,40 @@ class TestDVMFlexAttention(unittest.TestCase):
 
 
             def attention_loss(query, key, value):
-                return flex_attention(
+                output = flex_attention(
                     query, key, value, block_mask=block_mask
                 )
+                return output.float().square().mean(), output
 
 
-            # Forward only: the backward lowering under a mid-process backend
-            # switch is a separate known issue (the already-imported NPU flex
-            # kernel module keeps upstream lowering helpers, and the MLIR
-            # pointwise path raises KeyError in fn_to_aten_fn).
             compiled = torch.compile(
                 attention_loss,
                 backend="inductor",
                 fullgraph=True,
                 options={"npu_backend": "dvm"},
             )
-            actual = compiled(*inputs)
+            actual_loss, actual = compiled(*inputs)
+            actual_gradients = torch.autograd.grad(actual_loss, inputs)
 
-            reference_inputs = [tensor.detach().clone() for tensor in inputs]
+            reference_inputs = [
+                tensor.detach().clone().requires_grad_(True) for tensor in inputs
+            ]
             expected = dense_reference(*reference_inputs)
+            expected_loss = expected.float().square().mean()
+            expected_gradients = torch.autograd.grad(
+                expected_loss, reference_inputs
+            )
 
             torch.testing.assert_close(actual, expected, atol=0.03, rtol=0.03)
+            for actual_gradient, expected_gradient in zip(
+                actual_gradients, expected_gradients
+            ):
+                torch.testing.assert_close(
+                    actual_gradient,
+                    expected_gradient,
+                    atol=0.08,
+                    rtol=0.08,
+                )
             print("DVM_FLEX_ATTENTION_BACKEND_SWITCH_OK")
             """
         )

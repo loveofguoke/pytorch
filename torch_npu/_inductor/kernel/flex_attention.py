@@ -696,26 +696,35 @@ def _get_flex_attention_additional_lowerings():
     These lowerings allow supported fallback operations to be lowered as pointwise
     ops in the score_mod and mask_mod subgraphs.
     """
-    from torch._inductor.lowering import index_impl, make_pointwise
+    from torch._inductor import lowering
 
     additional_lowerings = {}
 
-    bitwise_and_fn = make_pointwise(ops.bitwise_and)
+    def make_pointwise_for_aten(fn, aten_fn):
+        make_pointwise = lowering.make_pointwise
+        register_fn = getattr(
+            make_pointwise, "_torch_npu_register_fn_to_aten_fn", None
+        )
+        if register_fn is not None:
+            fn = register_fn(fn, aten_fn)
+        return make_pointwise(fn)
+
+    bitwise_and_fn = make_pointwise_for_aten(ops.bitwise_and, aten.bitwise_and)
 
     def bitwise_and_tensor(a, b):
         return bitwise_and_fn(a, b)
 
-    bitwise_or_fn = make_pointwise(ops.bitwise_or)
+    bitwise_or_fn = make_pointwise_for_aten(ops.bitwise_or, aten.bitwise_or)
 
     def bitwise_or_tensor(a, b):
         return bitwise_or_fn(a, b)
 
-    bitwise_not_fn = make_pointwise(ops.bitwise_not)
+    bitwise_not_fn = make_pointwise_for_aten(ops.bitwise_not, aten.bitwise_not)
 
     def bitwise_not_default(a):
         return bitwise_not_fn(a)
 
-    remainder_fn = make_pointwise(ops.remainder)
+    remainder_fn = make_pointwise_for_aten(ops.remainder, aten.remainder)
 
     def integer_remainder(a, b):
         # Avoid ops.remainder here. Vector integer remainder currently lowers to
@@ -732,7 +741,7 @@ def _get_flex_attention_additional_lowerings():
         )
         return ops.where(needs_adjustment, ops.add(remainder, b), remainder)
 
-    integer_remainder_fn = make_pointwise(integer_remainder)
+    integer_remainder_fn = make_pointwise_for_aten(integer_remainder, aten.remainder)
 
     def remainder_scalar(a, b):
         if not a.get_dtype().is_floating_point and isinstance(b, int):
@@ -744,7 +753,7 @@ def _get_flex_attention_additional_lowerings():
         # scalar q/kv coordinates.  Keep that lookup inside the pointwise
         # subgraph; the global NPU index lowering may choose an ATen fallback,
         # which materializes a buffer that PointwiseSubgraphLowering rejects.
-        return index_impl(x, indices, check=True)
+        return lowering.index_impl(x, indices, check=True)
 
     additional_lowerings[aten.bitwise_and.Tensor] = bitwise_and_tensor
     additional_lowerings[aten.bitwise_or.Tensor] = bitwise_or_tensor
