@@ -568,6 +568,42 @@ class TorchCompileTriggerTests(unittest.TestCase):
             """
         )
 
+    def test_concurrent_backend_registration_loads_once(self):
+        self.run_in_subprocess(
+            """
+            import os
+            import sys
+            import threading
+            import time
+            from types import SimpleNamespace
+
+            import torch_npu
+            from torch_npu.utils import _dynamo
+
+            loads = []
+
+            def load_backend():
+                time.sleep(0.05)
+                loads.append(os.environ["TORCHINDUCTOR_NPU_BACKEND"])
+
+            _dynamo._InductorNpuRegistry._loaded_backend = None
+            os.environ["TORCHINDUCTOR_NPU_BACKEND"] = "dvm"
+            sys.modules["torch_npu._inductor"] = SimpleNamespace(
+                _load_backend=load_backend
+            )
+            workers = [
+                threading.Thread(target=_dynamo.register_inductor_npu)
+                for _ in range(8)
+            ]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+
+            assert loads == ["dvm"], loads
+            """
+        )
+
     # Verify shape handling is installed before selecting the requested backend.
     def test_shape_handling_initializes_before_backend_selection(self):
         self.run_in_subprocess(

@@ -318,15 +318,6 @@ def apply_mlir_lowering_patch(npu_lowering_module: Any) -> None:
         if name in npu_functions:
             setattr(inductor_lowering, name, npu_functions[name])
 
-    # DVM's make_pointwise records an FX graph for each generated pointwise
-    # node.  Out-of-tree kernel lowerings must register the originating ATen
-    # operator for any callable they pass to make_pointwise.  Keep the hook on
-    # the DVM function itself so restoring the upstream function also removes
-    # the DVM-only contract.
-    npu_lowering_module.make_pointwise._torch_npu_register_fn_to_aten_fn = (
-        npu_lowering_module.register_fn_to_aten_fn
-    )
-
     merge_missing_lowerings(
         npu_lowering_module.lowerings,
         inductor_lowering.lowerings,

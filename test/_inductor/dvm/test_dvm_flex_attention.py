@@ -16,6 +16,7 @@ class TestDVMFlexAttention(unittest.TestCase):
 
             import torch
             import torch_npu
+            from torch._inductor import lowering
             from torch._inductor.utils import run_and_get_code
             from torch.nn.attention.flex_attention import (
                 create_block_mask,
@@ -27,6 +28,12 @@ class TestDVMFlexAttention(unittest.TestCase):
             except ImportError as exc:
                 print(f"__SKIP__: dvm is not available: {exc}")
                 sys.exit(0)
+
+            assert getattr(
+                lowering.make_pointwise,
+                "_torch_npu_accepts_origin_fn",
+                False,
+            )
 
 
             torch.npu.set_device(0)
@@ -190,7 +197,6 @@ class TestDVMFlexAttention(unittest.TestCase):
             except ImportError as exc:
                 print(f"__SKIP__: dvm is not available: {exc}")
                 sys.exit(0)
-
 
             torch.npu.set_device(0)
             source = torch.tril(

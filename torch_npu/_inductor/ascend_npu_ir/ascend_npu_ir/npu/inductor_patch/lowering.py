@@ -626,6 +626,7 @@ def make_pointwise(
     override_fn_when_gpu_float64=None,
     allow_alpha=False,
     triton_fallback=None,
+    origin_fn=None,
     **kwargs
 ):
     def inner(*inputs: TensorBox, alpha=None):
@@ -705,8 +706,10 @@ def make_pointwise(
 
         input_graphs = fetch_graphs(inputs)
         node_name = f'pointwise_{next(node_id)}'
-        origin_fn = fn_to_aten_fn[fn]
-        new_graph = merge_traced_graphs(input_graphs, origin_fn, node_name, **kwargs)
+        traced_origin_fn = origin_fn if origin_fn is not None else fn_to_aten_fn[fn]
+        new_graph = merge_traced_graphs(
+            input_graphs, traced_origin_fn, node_name, **kwargs
+        )
 
         return Pointwise.create(
             device=device,
@@ -718,6 +721,9 @@ def make_pointwise(
         )
 
     return inner
+
+
+make_pointwise._torch_npu_accepts_origin_fn = True
 
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):

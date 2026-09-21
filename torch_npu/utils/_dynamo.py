@@ -45,6 +45,7 @@ def _create_npu_autocast_mode_variable(func, args, kwargs):
 class _InductorNpuRegistry:
     _disabled_register = False
     _loaded_backend = None
+    _lock = threading.RLock()
 
     @classmethod
     def register_inductor_npu(cls):
@@ -52,12 +53,13 @@ class _InductorNpuRegistry:
             return
 
         current = os.getenv("TORCHINDUCTOR_NPU_BACKEND", "default")
-        if cls._loaded_backend != current:
-            if "torch_npu._inductor" not in sys.modules:
-                importlib.import_module("torch_npu._inductor")
-            else:
-                sys.modules["torch_npu._inductor"]._load_backend()
-            cls._loaded_backend = current
+        with cls._lock:
+            if cls._loaded_backend != current:
+                if "torch_npu._inductor" not in sys.modules:
+                    importlib.import_module("torch_npu._inductor")
+                else:
+                    sys.modules["torch_npu._inductor"]._load_backend()
+                cls._loaded_backend = current
 
     @classmethod
     def disable_register(cls):

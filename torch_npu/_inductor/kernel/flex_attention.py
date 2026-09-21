@@ -702,11 +702,8 @@ def _get_flex_attention_additional_lowerings():
 
     def make_pointwise_for_aten(fn, aten_fn):
         make_pointwise = lowering.make_pointwise
-        register_fn = getattr(
-            make_pointwise, "_torch_npu_register_fn_to_aten_fn", None
-        )
-        if register_fn is not None:
-            fn = register_fn(fn, aten_fn)
+        if getattr(make_pointwise, "_torch_npu_accepts_origin_fn", False):
+            return make_pointwise(fn, origin_fn=aten_fn)
         return make_pointwise(fn)
 
     bitwise_and_fn = make_pointwise_for_aten(ops.bitwise_and, aten.bitwise_and)
