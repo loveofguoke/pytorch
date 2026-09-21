@@ -30,10 +30,11 @@ class TestDVMFlexAttention(unittest.TestCase):
 
 
             torch.npu.set_device(0)
-            sequence_length = 128
+            query_length = 64
+            key_value_length = 128
             allowed = torch.tril(
                 torch.ones(
-                    (sequence_length, sequence_length),
+                    (query_length, key_value_length),
                     device="npu",
                     dtype=torch.bool,
                 )
@@ -45,11 +46,11 @@ class TestDVMFlexAttention(unittest.TestCase):
                 # dense mask lookup.  This exercises DVM pointwise tracing for
                 # aten.bitwise_and.Tensor and captured tensor indexing.
                 return (
-                    (q_idx < sequence_length)
-                    & (kv_idx < sequence_length)
+                    (q_idx < query_length)
+                    & (kv_idx < key_value_length)
                     & allowed[
-                        q_idx.clamp(max=sequence_length - 1),
-                        kv_idx.clamp(max=sequence_length - 1),
+                        q_idx.clamp(max=query_length - 1),
+                        kv_idx.clamp(max=key_value_length - 1),
                     ]
                 )
 
@@ -71,7 +72,8 @@ class TestDVMFlexAttention(unittest.TestCase):
 
 
             torch.manual_seed(2026)
-            shape = (1, 2, sequence_length, 64)
+            query_shape = (1, 2, query_length, 64)
+            key_value_shape = (1, 2, key_value_length, 64)
             inputs = [
                 torch.randn(
                     shape,
@@ -79,14 +81,14 @@ class TestDVMFlexAttention(unittest.TestCase):
                     dtype=torch.bfloat16,
                     requires_grad=True,
                 )
-                for _ in range(3)
+                for shape in (query_shape, key_value_shape, key_value_shape)
             ]
             block_mask = create_block_mask(
                 bounded_captured_mask,
-                B=shape[0],
-                H=shape[1],
-                Q_LEN=shape[2],
-                KV_LEN=shape[2],
+                B=query_shape[0],
+                H=query_shape[1],
+                Q_LEN=query_length,
+                KV_LEN=key_value_length,
                 device="npu",
             )
 
@@ -174,6 +176,74 @@ class TestDVMFlexAttention(unittest.TestCase):
             self.skipTest(proc.stdout.strip())
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("DVM_TRITON_FLEX_ATTENTION_OK", proc.stdout)
+
+    def test_chained_safe_and_unsafe_index_pointwise(self):
+        script = textwrap.dedent(
+            r"""
+            import sys
+
+            import torch
+            import torch_npu
+
+            try:
+                __import__("torch_npu._C.dvm")
+            except ImportError as exc:
+                print(f"__SKIP__: dvm is not available: {exc}")
+                sys.exit(0)
+
+
+            torch.npu.set_device(0)
+            source = torch.tril(
+                torch.ones((16, 24), device="npu", dtype=torch.bool)
+            )
+            rows = torch.tensor([0, 1, 3, 7, 9], device="npu")
+            columns = torch.tensor([0, 2, 1, 6, 8], device="npu")
+
+
+            def lookup_then_pointwise(source, rows, columns):
+                safe = source[rows, columns]
+                unsafe = torch.ops.aten._unsafe_index.Tensor(
+                    source, [rows, columns]
+                )
+                return (
+                    safe & (rows < source.shape[0]),
+                    unsafe | (columns >= source.shape[1]),
+                )
+
+
+            expected = lookup_then_pointwise(source, rows, columns)
+            compiled = torch.compile(
+                lookup_then_pointwise,
+                backend="inductor",
+                fullgraph=True,
+                options={"npu_backend": "dvm"},
+            )
+            actual = compiled(source, rows, columns)
+            torch.testing.assert_close(actual[0], expected[0])
+            torch.testing.assert_close(actual[1], expected[1])
+            print("DVM_CHAINED_INDEX_POINTWISE_OK")
+            """
+        )
+
+        with tempfile.TemporaryDirectory(prefix="dvm_index_pointwise_") as tmp_dir:
+            env = os.environ.copy()
+            env["TORCHINDUCTOR_NPU_BACKEND"] = "dvm"
+            env["TORCHINDUCTOR_COMPILE_THREADS"] = "1"
+            env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
+            env["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(tmp_dir, "cache")
+            env["TRITON_CACHE_DIR"] = os.path.join(tmp_dir, "triton")
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+        if "__SKIP__:" in proc.stdout:
+            self.skipTest(proc.stdout.strip())
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn("DVM_CHAINED_INDEX_POINTWISE_OK", proc.stdout)
 
     def test_backend_switch_after_torch_npu_inductor_import(self):
         # Regression: importing torch_npu._inductor first loads the default

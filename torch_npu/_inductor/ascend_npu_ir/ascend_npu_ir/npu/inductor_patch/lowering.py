@@ -3664,14 +3664,24 @@ def index_output_size_and_inner_fn(
     return output_size, fn
 
 
-def index_impl(x, indices, check):
+def index_impl(x, indices, check, traced_op=aten.index.Tensor):
     output_size, inner_fn, _ = index_impl_helper(x, indices, check)
+
+    input_graphs = fetch_graphs([x, indices])
+    node_name = f"index_{next(node_id)}"
+    traced_graph = merge_traced_graphs(
+        input_graphs,
+        traced_op,
+        node_name,
+    )
 
     return Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=inner_fn,
         ranges=output_size,
+        node_name=node_name,
+        traced_graph=traced_graph,
     )
 
 
@@ -3726,7 +3736,12 @@ def index(x, indices):
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
 def _unsafe_index(x, indices):
-    return index_impl(x, indices, check=False)
+    return index_impl(
+        x,
+        indices,
+        check=False,
+        traced_op=aten._unsafe_index.Tensor,
+    )
 
 
 # All the indexing decompositions are written in terms of index, index_put, and index_put_
