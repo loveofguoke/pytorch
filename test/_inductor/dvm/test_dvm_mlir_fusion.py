@@ -138,6 +138,17 @@ class Int64PointwiseFusionModel(torch.nn.Module):
         return pointwise, dense_mask, ids
 
 
+class FallbackViewExpandModel(torch.nn.Module):
+    def forward(self, real, imag, positions):
+        rope_cache = torch.complex(real, imag)
+        selected = torch.complex(
+            rope_cache.real[positions],
+            rope_cache.imag[positions],
+        )
+        selected = selected.view(positions.numel(), 1, real.shape[-1])
+        return selected.real.repeat_interleave(2, dim=-1).unsqueeze(0)
+
+
 class TestDvmByMlir(TestCase):
     def _run_and_get_code_with_dvm(
         self, model, *args, dynamic=False, options=None, run_count=1
@@ -223,6 +234,19 @@ class TestDvmByMlir(TestCase):
         self.assertIn("k.equal", code)
         self.assertIn("k.select(", code)
 
+    def test_expand_after_fallback_buffer(self):
+        real = torch.randn((128, 32), dtype=torch.float32, device="npu")
+        imag = torch.randn((128, 32), dtype=torch.float32, device="npu")
+        positions = torch.arange(64, dtype=torch.int64, device="npu")
+        model = FallbackViewExpandModel()
+
+        with torch.no_grad():
+            expect = model(real, imag, positions)
+            result, _ = self._run_and_get_code_with_dvm(
+                model, real, imag, positions
+            )
+
+        self.assertEqual(expect, result)
 
     @parametrize("dtype", [torch.float16, torch.float32, torch.bfloat16])
     @parametrize("is_dynamic", [True, False])

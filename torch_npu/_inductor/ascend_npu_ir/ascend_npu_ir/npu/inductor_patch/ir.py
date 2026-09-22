@@ -221,15 +221,25 @@ def try_get_buffer(inp):
     return try_get_buffer(inp.data)
 
 
+def get_producer_traced_graph(buffer):
+    if isinstance(buffer, (ir.MultiOutput, ir.InputBuffer, ir.ConcatKernel)):
+        return None
+    producer = getattr(buffer, "data", None)
+    get_traced_graph = getattr(producer, "get_traced_graph", None)
+    if get_traced_graph is None:
+        return None
+    return get_traced_graph()
+
+
 def _patch_baseview_realize(self):
     if hasattr(self, "traced_graph") and self.traced_graph is not None:
         r = self.data.realize()
         buffer = try_get_buffer(self)
         if not buffer:
             return r
-        if isinstance(buffer, (ir.MultiOutput, ir.InputBuffer, ir.ConcatKernel)):
+        traced_graph = get_producer_traced_graph(buffer)
+        if traced_graph is None:
             return r
-        traced_graph = buffer.data.get_traced_graph()
         buf_name = buffer.get_name()
         new_traced_graph, placeholder = subtract_graph(
             self.traced_graph, traced_graph, node_name=buf_name
@@ -254,9 +264,9 @@ def _patch_baseview_realize_hint(self):
         buffer = try_get_buffer(self)
         if not buffer:
             return r
-        if isinstance(buffer, (ir.MultiOutput, ir.InputBuffer, ir.ConcatKernel)):
+        traced_graph = get_producer_traced_graph(buffer)
+        if traced_graph is None:
             return r
-        traced_graph = buffer.data.get_traced_graph()
         buf_name = buffer.get_name()
         new_traced_graph, placeholder = subtract_graph(
             self.traced_graph, traced_graph, node_name=buf_name
@@ -281,9 +291,9 @@ def _patch_mark_reuse(self, users, **kwargs):
         buffer = try_get_buffer(self)
         if not buffer:
             return r
-        if isinstance(buffer, (ir.MultiOutput, ir.InputBuffer, ir.ConcatKernel)):
+        traced_graph = get_producer_traced_graph(buffer)
+        if traced_graph is None:
             return r
-        traced_graph = buffer.data.get_traced_graph()
         buf_name = buffer.get_name()
         new_traced_graph, placeholder = subtract_graph(
             self.traced_graph, traced_graph, node_name=buf_name
