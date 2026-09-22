@@ -31,7 +31,7 @@ def _patch_loops_get_name(self):
 
 
 def _patch_loops_get_traced_graph(self):
-    return self.traced_graph
+    return getattr(self, "traced_graph", None)
 
 
 @classmethod
