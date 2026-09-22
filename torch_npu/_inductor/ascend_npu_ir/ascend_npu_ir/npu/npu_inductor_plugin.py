@@ -9,6 +9,7 @@ from torch.utils._ordered_set import OrderedSet
 import torch
 import torch.nn.functional as F
 
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.utils import set_current_node, UnsupportedFakeTensorException
 
 from typing import (
@@ -162,9 +163,28 @@ def _patch_run_node(tracer, node, args, kwargs, nnmodule):
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
+            from torch._dynamo import graph_break_hints
             from torch._dynamo.exc import unimplemented
 
-            unimplemented(make_error_message(e), from_exc=e)
+            hints = [*graph_break_hints.USER_ERROR]
+            if isinstance(e, NotImplementedError):
+                hints += [
+                    "If the op is a custom op, did you implement a fake tensor "
+                    "implementation? (e.g. with `@my_custom_op.register_fake`)",
+                    "If the op is a PyTorch op, please file an issue to PyTorch.",
+                ]
+            unimplemented(
+                gb_type=(
+                    "NotImplementedError/UnsupportedFakeTensorException when "
+                    "running FX node"
+                ),
+                context="",
+                explanation=make_error_message(e),
+                hints=hints,
+                from_exc=e,
+            )
+        except Unsupported:
+            raise
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
