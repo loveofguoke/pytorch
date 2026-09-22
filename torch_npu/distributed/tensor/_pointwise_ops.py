@@ -49,6 +49,7 @@ else:
 custom_pointwise_ops = [
     # please keep the entries below alphabetically sorted
     # native ops
+    aten.complex.default,
     aten.isclose.default,
     aten.isfinite.default,
     # custom ops

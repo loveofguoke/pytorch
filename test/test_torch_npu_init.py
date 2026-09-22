@@ -577,6 +577,7 @@ class TestTorchNpuBootstrap(TestCase):
             from torch.distributed.tensor import DTensor
 
             strategy_funcs = DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs
+            assert torch.ops.aten.complex.default in strategy_funcs
             assert torch.ops.npu.npu_rms_norm.default in strategy_funcs
             assert torch.ops.npu.npu_fusion_attention.default in strategy_funcs
 
@@ -596,6 +597,19 @@ class TestTorchNpuBootstrap(TestCase):
             )
             try:
                 mesh = DeviceMesh("cpu", [0])
+                real = DTensor.from_local(
+                    torch.randn(2, 4), mesh, (Replicate(),), run_check=False
+                )
+                imag = DTensor.from_local(
+                    torch.randn(2, 4), mesh, (Replicate(),), run_check=False
+                )
+                complex_result = torch.complex(real, imag)
+                assert complex_result.placements == (Replicate(),)
+                torch.testing.assert_close(
+                    complex_result.to_local(),
+                    torch.complex(real.to_local(), imag.to_local()),
+                )
+
                 tensor_meta = TensorMeta(
                     torch.Size([2, 4, 8]), (32, 8, 1), torch.float32
                 )
