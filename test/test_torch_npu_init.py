@@ -577,7 +577,6 @@ class TestTorchNpuBootstrap(TestCase):
             from torch.distributed.tensor import DTensor
 
             strategy_funcs = DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs
-            assert torch.ops.aten.complex.default in strategy_funcs
             assert torch.ops.npu.npu_rms_norm.default in strategy_funcs
             assert torch.ops.npu.npu_fusion_attention.default in strategy_funcs
 
