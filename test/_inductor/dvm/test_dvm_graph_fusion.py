@@ -14,6 +14,10 @@ from torch_npu._inductor.dvm.graph_fusion import (
     _fused_metas,
 )
 from torch_npu._inductor.dvm.graph_build import is_fx_dynamic
+from torch_npu._inductor.dvm.util import (
+    apply_dvm_input_layouts,
+    codegen_maybe_view_load,
+)
 
 
 class TestModule(torch.nn.Module):
@@ -169,6 +173,61 @@ class TestDvmFallbackStridePatchGuard(TestCase):
             mock_patch.assert_called_once_with(meta.gm, ["buf0"])
         finally:
             _fused_metas.pop(0, None)
+
+
+class TestDvmViewLoadSelection(TestCase):
+    @mock.patch("torch_npu._inductor.dvm.util.dvm_config.view_fusion_level", 1)
+    def test_dense_layout_uses_view_load(self):
+        expression, skip_contiguous = codegen_maybe_view_load(
+            [8, 4, 32], [32, 256, 1], torch.float32, is_symbolic=False
+        )
+
+        self.assertIn("view_load", expression)
+        self.assertTrue(skip_contiguous)
+
+    @mock.patch("torch_npu._inductor.dvm.util.dvm_config.view_fusion_level", 1)
+    def test_gapped_slice_is_materialized_before_load(self):
+        # RoPE backward slices the upper half of a [1024, 1, 64] tensor.  The
+        # resulting [1024, 1, 32] view is contiguous within each row but has a
+        # 32-element gap between rows, which DVM view_load cannot safely read.
+        expression, skip_contiguous = codegen_maybe_view_load(
+            [1024, 1, 32], [64, 65536, 1], torch.float32, is_symbolic=False
+        )
+
+        self.assertNotIn("view_load", expression)
+        self.assertFalse(skip_contiguous)
+
+    @parametrize(
+        "shape,stride,expect_view_load",
+        [
+            ([8, 4, 32], [32, 256, 1], True),
+            ([8, 1, 32], [32, 65536, 1], True),
+            ([1024, 1, 32], [64, 65536, 1], False),
+            ([8, 4, 32], [0, 32, 1], False),
+            ([8, 4, 32], [128, 0, 1], False),
+            ([8, 4, 32], [256, 32, 1], False),
+        ],
+    )
+    @mock.patch("torch_npu._inductor.dvm.util.dvm_config.view_fusion_level", 1)
+    def test_layout_matrix(self, shape, stride, expect_view_load):
+        expression, skip_contiguous = codegen_maybe_view_load(
+            shape, stride, torch.float32, is_symbolic=False
+        )
+
+        self.assertEqual("view_load" in expression, expect_view_load)
+        self.assertEqual(skip_contiguous, expect_view_load)
+
+    def test_wrapper_materializes_and_transposes_inputs(self):
+        call_args = apply_dvm_input_layouts(
+            ["arg0", "arg1", "output"],
+            [False, True],
+            [False, True],
+        )
+
+        self.assertEqual(call_args, ["arg0.contiguous()", "arg1.mT", "output"])
+
+
+instantiate_parametrized_tests(TestDvmViewLoadSelection)
 
 
 if __name__ == "__main__":

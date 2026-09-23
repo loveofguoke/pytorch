@@ -36,6 +36,7 @@ from .op_emitter import (
     DVM_SUPPORT_TYPE,
     _extra_int_types,
 )
+from .util import apply_dvm_input_layouts
 from .template import (
     can_fuse_dvm_epilogue,
     DvmTemplateBuffer,
@@ -128,6 +129,11 @@ class NpuDvmKernel(NpuMlirKernel):
 
         self.dvm_codegen = None
         return self._gm.print_readable(print_output=False)
+
+    def call_kernel(self, name, node=None, call_args=None):
+        if call_args is not None:
+            self._call_args = call_args
+        return super().call_kernel(name, node)
 
 
 def _kernel_layout_key(mlir_kernel):
@@ -343,24 +349,27 @@ class NpuDvmScheduling(NpuMetaScheduling):
         with V.set_kernel_handler(mlir_kernel):
             src_code = mlir_kernel.codegen_kernel()
 
-        need_trans_input = getattr(
-            mlir_kernel.dvm_codegen, "need_trans_input", ()
-        )
         for index, arg in enumerate(call_args):
             if arg in template_buffer.input_bindings:
                 arg = V.graph.wrapper_code.val_to_arg_str(
                     template_buffer.input_bindings[arg]
                 )
-            if index < len(need_trans_input) and need_trans_input[index]:
-                arg += ".mT"
             call_args[index] = arg
 
+        dvm_codegen = mlir_kernel.dvm_codegen
+        call_args = apply_dvm_input_layouts(
+            call_args,
+            getattr(dvm_codegen, "cont_flag_input", ()),
+            getattr(dvm_codegen, "need_trans_input", ()),
+        )
         kernel_name = self.define_kernel(src_code, mlir_kernel, traced_graph)
         with V.set_kernel_handler(mlir_kernel):
             for node in snodes:
                 node.mark_run()
         self.codegen_comment(snodes)
-        mlir_kernel.call_kernel(kernel_name, template_node.node)
+        mlir_kernel.call_kernel(
+            kernel_name, template_node.node, call_args=call_args
+        )
         self.free_buffers_in_scheduler()
 
 

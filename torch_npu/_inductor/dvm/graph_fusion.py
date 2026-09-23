@@ -21,7 +21,10 @@ from torch.fx.passes.utils.fuser_utils import (
 
 from . import config as dvm_config
 from .graph_build import DvmCodegenInterpreter, is_fx_dynamic
-from .util import patch_gm_placeholder_strides_from_codegen_args
+from .util import (
+    apply_dvm_input_layouts,
+    patch_gm_placeholder_strides_from_codegen_args,
+)
 from .fx_test import generate_dvm_fx_case
 from .op_emitter import DVM_OP_REGISTRY
 from .fx_pass import (
@@ -377,13 +380,9 @@ def _dvm_generate_fallback_kernel(self, fallback_kernel):
     buf_name = fallback_kernel.get_name()
 
     args_list = list(args[:-1])
-    # cont/trans handling based on codegen interpreter
-    for i, skip_cont in enumerate(cg.cont_flag_input):
-        if not skip_cont:
-            args_list[i] += ".contiguous()"
-    for i, trans in enumerate(cg.need_trans_input):
-        if trans:
-            args_list[i] += ".mT"
+    args_list = apply_dvm_input_layouts(
+        args_list, cg.cont_flag_input, cg.need_trans_input
+    )
 
     self.writeline(f"{buf_name} = {meta.name}({', '.join(args_list)})")
     self.add_import_once("from torch_npu._inductor import dvm")
