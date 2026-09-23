@@ -17,7 +17,7 @@ class TestFlexAttentionConfigGenerator(unittest.TestCase):
             kernel_options=kernel_options,
         ).generate_configs()
 
-    def test_default_autotune_omits_unsafe_block_n_for_backward_modes(self):
+    def test_default_search_omits_unsafe_block_n_for_backward_modes(self):
         with inductor_config.patch(
             {
                 "max_autotune": True,
@@ -74,7 +74,7 @@ class TestFlexAttentionConfigGenerator(unittest.TestCase):
         self.assertEqual(len(configs), 1)
         self.assertEqual(configs[0]["BLOCK_N1"], 128)
 
-    def test_non_autotune_order_is_unchanged(self):
+    def test_non_autotune_uses_safe_default_backward_block_n(self):
         with inductor_config.patch(
             {
                 "max_autotune": False,
@@ -83,8 +83,8 @@ class TestFlexAttentionConfigGenerator(unittest.TestCase):
         ):
             configs = self._generate()
 
-        self.assertEqual(len(configs), 16)
-        self.assertEqual(configs[0]["BLOCK_N1"], 128)
+        self.assertEqual(len(configs), 12)
+        self.assertEqual(configs[0]["BLOCK_N1"], 64)
 
 
 if __name__ == "__main__":

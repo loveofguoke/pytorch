@@ -140,7 +140,6 @@ class FlexAttentionConfigGenerator:
             self.mode in self._BACKWARD_MODES
             and user_block_n is None
             and not (self.mode == FlexMode.BWD and user_block_m == 128)
-            and getattr(inductor_config, "max_autotune", False)
             and getattr(
                 inductor_config,
                 "max_autotune_flex_search_space",
