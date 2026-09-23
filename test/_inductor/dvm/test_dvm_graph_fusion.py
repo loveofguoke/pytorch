@@ -1,5 +1,6 @@
 from unittest import mock
 
+import sympy
 import torch
 
 from torch.testing._internal.common_utils import TestCase
@@ -17,6 +18,9 @@ from torch_npu._inductor.dvm.graph_build import is_fx_dynamic
 from torch_npu._inductor.dvm.util import (
     apply_dvm_input_layouts,
     codegen_maybe_view_load,
+)
+from torch_npu._inductor.ascend_npu_ir.ascend_npu_ir.npu.inductor_patch import (
+    lowering as npu_lowering,
 )
 
 
@@ -41,6 +45,22 @@ class MatMulModule(torch.nn.Module):
 
 
 class TestDvmByGraphFusion(TestCase):
+    def test_broadcast_symbolic_shapes_does_not_guard_unbacked_size_as_one(self):
+        # The lowering operates on SymPy expressions.  Use an unhinted symbol to
+        # model the data-dependent token count produced by EP repeat_interleave.
+        unbacked_expr = sympy.Symbol("u0", integer=True, nonnegative=True)
+        sizevars = mock.Mock()
+        sizevars.is_size_one_or_false.side_effect = lambda value: value == 1
+        graph = mock.Mock(sizevars=sizevars)
+
+        with mock.patch.object(npu_lowering.V, "graph", graph):
+            result = npu_lowering.broadcast_symbolic_shapes(
+                (unbacked_expr,), (sympy.S.One,)
+            )
+
+        self.assertEqual(result, (unbacked_expr,))
+        sizevars.check_equals.assert_not_called()
+
     @parametrize("dtype", [torch.float16, torch.float32, torch.bfloat16])
     @parametrize("is_dynamic", [True, False])
     def test_basic_partitioning(self, dtype, is_dynamic):
