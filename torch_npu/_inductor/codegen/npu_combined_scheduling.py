@@ -71,13 +71,18 @@ class NPUCombinedScheduling(CUDACombinedScheduling, TritonScheduling):
         # that CUDA-only scheduler, so this fusion path is not applicable.
         return False
 
+    def can_fuse_reduction_pair(self, node1, node2) -> bool:
+        # PyTorch 2.15 added a CUDA override backed by NVIDIA-only state.
+        # NPU keeps BaseScheduling's generic contract: reduction pairs may fuse.
+        return True
+
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
         if not npu_config.enable_welford:
             # Preserve the backend default ordering when the Welford path is
             # disabled.
-            return super().get_fusion_pair_priority(node1, node2)
+            return self._triton_scheduling.get_fusion_pair_priority(node1, node2)
 
         from ..choices import (
             is_same_welford_output_group,
@@ -92,7 +97,7 @@ class NPUCombinedScheduling(CUDACombinedScheduling, TritonScheduling):
             return 1
         # Pairs without Welford nodes keep the baseline ordering so unrelated
         # fusion decisions stay identical to the upstream default.
-        return super().get_fusion_pair_priority(node1, node2)
+        return self._triton_scheduling.get_fusion_pair_priority(node1, node2)
 
     def codegen_template(
         self,

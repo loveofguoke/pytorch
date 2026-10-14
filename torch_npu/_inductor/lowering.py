@@ -141,15 +141,22 @@ if npu_config.dump_fx_graph:
     scheduler._prune_redundant_deps = _npu_prune_redundant_deps
     Scheduler._get_unmet_dep_nodes = _npu_get_unmet_dep_nodes
 
-def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
+def make_reduction(
+    reduction_type: ReductionType,
+    override_return_dtype=None,
+    *,
+    strict_reduction: bool = False,
+):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
-        kwargs = _make_reduction_inner(
-            x,
+        reduction_kwargs = dict(
             axis=axis,
             keepdims=keepdims,
             dtype=dtype,
             override_return_dtype=override_return_dtype,
         )
+        if not npu_config.dump_fx_graph:
+            reduction_kwargs["reduction_type"] = reduction_type
+        kwargs = _make_reduction_inner(x, **reduction_kwargs)
         if npu_config.dump_fx_graph:
             node_name = f'reduction_{next(node_id)}'
             input_graphs = fetch_graphs([x, axis if axis is not None else list(range(len(x.get_size())))])
@@ -163,6 +170,7 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
         else:
             result = Reduction.create(reduction_type=reduction_type,
                                       input_node=x,
+                                      strict_reduction=strict_reduction,
                                       **kwargs)
         if isinstance(
             result.data.data,  # type: ignore[attr-defined]
