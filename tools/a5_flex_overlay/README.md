@@ -37,3 +37,13 @@ of GLM. In fresh A5 processes, static execution with runtime stride slots fails;
 `--dynamic-strides` passes both contiguous and `(96, 32, 1)` strided inputs with
 exact output equality. End-to-end DVM training must still pass before accepting
 the overlay; this small probe alone is not model or distributed validation.
+
+`--dvm-compat` additionally applies the Flex-only scalar right-shift lowering.
+The GLM mask binary search uses a nonnegative integer midpoint, expressed as
+`(lower + upper) >> 1`. Without this lowering DVM's global fallback creates a
+buffer inside a pointwise Flex subgraph, which cannot contain such buffers.
+The override maps only this subgraph operation to `ops.bitwise_right_shift`;
+it does not change global fallback policy or attention math. The device
+forward/QKV-gradient oracle and two-step single-rank GLM local-compile gate
+pass with this overlay. Distributed validation is separate; this is not
+whole-step GraphTrainer coverage.
