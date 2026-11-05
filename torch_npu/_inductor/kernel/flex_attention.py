@@ -3033,7 +3033,10 @@ def _register_npu_inductor_flex_attention():
                 full_kv_indices,
                 full_q_num_blocks,
                 full_q_indices,
-            ) = (kv_num_blocks, kv_indices, q_num_blocks, q_indices)
+            ) = (
+                empty([0] * len(source.get_size()), device=query.get_device(), dtype=source.get_dtype())
+                for source in (kv_num_blocks, kv_indices, q_num_blocks, q_indices)
+            )
 
         set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 

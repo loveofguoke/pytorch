@@ -1,7 +1,7 @@
 diff --git a/torch_npu/_inductor/kernel/flex_attention.py b/torch_npu/_inductor/kernel/flex_attention.py
 --- a/torch_npu/_inductor/kernel/flex_attention.py
 +++ b/torch_npu/_inductor/kernel/flex_attention.py
-@@ -3165,4 +3165,11 @@
+@@ -3165,4 +3165,14 @@
          has_full_blocks = full_kv_num_blocks is not None
          kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
 +        if not has_full_blocks:
@@ -10,6 +10,9 @@ diff --git a/torch_npu/_inductor/kernel/flex_attention.py b/torch_npu/_inductor/
 +                full_kv_indices,
 +                full_q_num_blocks,
 +                full_q_indices,
-+            ) = (kv_num_blocks, kv_indices, q_num_blocks, q_indices)
++            ) = (
++                empty([0] * len(source.get_size()), device=query.get_device(), dtype=source.get_dtype())
++                for source in (kv_num_blocks, kv_indices, q_num_blocks, q_indices)
++            )
  
          set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)

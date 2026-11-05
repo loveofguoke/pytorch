@@ -5,8 +5,10 @@ This deploys only the empty-full-block metadata normalization from committed
 differs substantially from this checkout, so replacing its whole kernel module
 would be incorrect. The patch preserves `HAS_FULL_BLOCKS=False` and argument
 positions. Newer NPU templates read full-metadata strides even with full blocks
-disabled, so unused slots alias the corresponding partial metadata with valid
-rank/strides and no new allocation. `HAS_FULL_BLOCKS=False` still prevents kernel
+disabled, so unused slots use independent zero-element tensors with matching
+rank and dtype. Aliasing partial metadata is not valid here: template bodies
+hard-code argument names that IR deduplication can rename. No nonzero data
+buffer is allocated. `HAS_FULL_BLOCKS=False` still prevents kernel
 loads through those slots; no blocks are promoted to full and the predicate is
 unchanged. The original commit contains a compiled
 captured-mask forward/QKV-gradient regression.
