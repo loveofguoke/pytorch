@@ -1,0 +1,8 @@
+diff --git a/torch_npu/_inductor/kernel/flex_attention.py b/torch_npu/_inductor/kernel/flex_attention.py
+--- a/torch_npu/_inductor/kernel/flex_attention.py
++++ b/torch_npu/_inductor/kernel/flex_attention.py
+@@ -887,3 +887,4 @@
+     additional_lowerings[aten.bitwise_or.Tensor] = bitwise_or_tensor
+     additional_lowerings[aten.bitwise_not.default] = bitwise_not_default
++    additional_lowerings[aten.__rshift__.Scalar] = make_pointwise(ops.bitwise_right_shift)
+     additional_lowerings[aten.remainder.Scalar] = remainder_scalar

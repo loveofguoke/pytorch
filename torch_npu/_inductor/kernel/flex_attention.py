@@ -775,6 +775,7 @@ def _get_flex_attention_additional_lowerings():
     additional_lowerings[aten.bitwise_and.Tensor] = bitwise_and_tensor
     additional_lowerings[aten.bitwise_or.Tensor] = bitwise_or_tensor
     additional_lowerings[aten.bitwise_not.default] = bitwise_not_default
+    additional_lowerings[aten.__rshift__.Scalar] = make_pointwise(ops.bitwise_right_shift)
     additional_lowerings[aten.remainder.Scalar] = remainder_scalar
     additional_lowerings[aten.index.Tensor] = index_tensor
     additional_lowerings[torch.ops.flex_lib.zeros_and_scatter.default] = zeros_and_scatter_lowering
