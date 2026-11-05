@@ -18,7 +18,10 @@ def is_fx_dynamic(graph):
             if val is None:
                 continue
             if isinstance(val, torch.Tensor):
-                if any(isinstance(dim, torch.SymInt) for dim in val.shape):
+                if any(
+                    isinstance(dim, torch.SymInt)
+                    for dim in (*val.shape, *val.stride())
+                ):
                     return True
             elif isinstance(val, (torch.SymInt, torch.SymFloat)):
                 return True

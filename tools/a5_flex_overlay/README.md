@@ -23,3 +23,17 @@ The destination must not exist. The installed package is copied, not changed.
 source package version, repository commit, overlay path and printed kernel hash
 with each run. This is a diagnostic source overlay, not an official wheel or a
 claim that the vendor build already includes the fix.
+
+For the separately reproduced DVM fixed-shape/symbolic-stride failure, add
+`--dvm-dynamic-strides` as the third argument. This also applies the narrow
+`graph_build.is_fx_dynamic` correction: symbolic tensor strides require the
+dynamic DVM kernel even when every dimension is concrete. Otherwise generated
+`view_load(..., [-1, -1, 1], ...)` runs in a static kernel with missing runtime
+stride metadata, causing the observed A5 MTE alignment exception. No RoPE math,
+view-fusion setting, recomputation policy, or installed file is changed.
+
+`tools/a5_dvm_cast.py` reproduces the generated BF16-to-FP32 cast independently
+of GLM. In fresh A5 processes, static execution with runtime stride slots fails;
+`--dynamic-strides` passes both contiguous and `(96, 32, 1)` strided inputs with
+exact output equality. End-to-end DVM training must still pass before accepting
+the overlay; this small probe alone is not model or distributed validation.
