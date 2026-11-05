@@ -11,6 +11,7 @@ from torch_npu._inductor import dvm
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("contiguous", "strided"), required=True)
+    parser.add_argument("--dynamic-strides", action="store_true")
     args = parser.parse_args()
     torch.npu.set_device(0)
     generator = torch.Generator().manual_seed(61)
@@ -22,13 +23,14 @@ def main():
     output = torch.empty((256, 1, 32), device="npu", dtype=torch.float32)
     print(json.dumps({
         "mode": args.mode, "torch": torch.__version__, "torch_npu": torch_npu.__version__,
+        "dynamic_strides": args.dynamic_strides,
         "shape": list(value.shape), "stride": list(value.stride()),
         "storage_offset": value.storage_offset(),
         "pointer_mod_32": value.data_ptr() % 32,
         "pointer_mod_256": value.data_ptr() % 256,
     }), flush=True)
 
-    @dvm.kernel(ktype="vector", dyn_shape=False)
+    @dvm.kernel(ktype="vector", dyn_shape=args.dynamic_strides)
     def copy(k):
         loaded = k.view_load([256, 1, 32], [-1, -1, 1], dvm.bfloat16)
         converted = k.cast(loaded, dvm.float32)
