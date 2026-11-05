@@ -15,6 +15,8 @@ captured-mask forward/QKV-gradient regression.
 
 ```bash
 bash tools/a5_flex_overlay/prepare.sh /absolute/site-packages/torch_npu /fresh/overlay
+TORCHINDUCTOR_CACHE_DIR=/fresh/overlay/inductor-cache \
+TRITON_CACHE_DIR=/fresh/overlay/triton-cache \
 PYTHONPATH=/fresh/overlay:$PYTHONPATH python ...
 ```
 
@@ -23,6 +25,11 @@ The destination must not exist. The installed package is copied, not changed.
 source package version, repository commit, overlay path and printed kernel hash
 with each run. This is a diagnostic source overlay, not an official wheel or a
 claim that the vendor build already includes the fix.
+
+Use fresh compiler caches for each source overlay and backend. Changing these
+Python lowering files without changing the wheel version does not reliably
+invalidate existing generated code. The A5 DVM regression otherwise reused a
+pre-fix static cast; a fresh cache regenerated the dynamic kernel and passed.
 
 For the separately reproduced DVM fixed-shape/symbolic-stride failure, add
 `--dvm-dynamic-strides` as the third argument. This also applies the narrow
